@@ -7,11 +7,32 @@ const cwd = process.cwd()
 const forwardedArgs = process.argv.slice(2)
 const bunBin = process.execPath
 
+function getAllowedDevHosts(args: string[]) {
+  const hosts = new Set<string>(["localhost", "127.0.0.1", "0.0.0.0"])
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+    if (arg !== "--host") continue
+
+    const next = args[index + 1]
+    if (!next || next.startsWith("-")) continue
+    hosts.add(next)
+    index += 1
+  }
+
+  return [...hosts]
+}
+
+const clientEnv = {
+  ...process.env,
+  KANNA_DEV_ALLOWED_HOSTS: JSON.stringify(getAllowedDevHosts(forwardedArgs)),
+}
+
 function spawnLabeledProcess(label: string, args: string[]) {
   const child = spawn(bunBin, args, {
     cwd,
     stdio: "inherit",
-    env: process.env,
+    env: label === "client" ? clientEnv : process.env,
   })
 
   child.on("spawn", () => {
