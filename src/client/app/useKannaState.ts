@@ -91,6 +91,12 @@ export interface ProjectRequest {
   title: string
 }
 
+interface OpenProjectResult {
+  projectId: string
+  latestChatId?: string | null
+  importedChatCount?: number
+}
+
 export type StartChatIntent =
   | { kind: "project_id"; projectId: string }
   | { kind: "local_path"; localPath: string }
@@ -416,17 +422,17 @@ export function useKannaState(activeChatId: string | null): KannaState {
     setCommandError(null)
   }
 
-  async function resolveProjectIdForStartChat(intent: StartChatIntent): Promise<{ projectId: string; localPath?: string }> {
+  async function resolveProjectForStartChat(intent: StartChatIntent): Promise<OpenProjectResult & { localPath?: string }> {
     if (intent.kind === "project_id") {
       return { projectId: intent.projectId }
     }
 
     if (intent.kind === "local_path") {
-      const result = await socket.command<{ projectId: string }>({ type: "project.open", localPath: intent.localPath })
+      const result = await socket.command<OpenProjectResult>({ type: "project.open", localPath: intent.localPath })
       return { projectId: result.projectId, localPath: intent.localPath }
     }
 
-    const result = await socket.command<{ projectId: string }>(
+    const result = await socket.command<OpenProjectResult>(
       intent.project.mode === "new"
         ? { type: "project.create", localPath: intent.project.localPath, title: intent.project.title }
         : { type: "project.open", localPath: intent.project.localPath }
@@ -445,8 +451,18 @@ export function useKannaState(activeChatId: string | null): KannaState {
         setStartingLocalPath(localPath)
       }
 
-      const { projectId } = await resolveProjectIdForStartChat(intent)
-      await createChatForProject(projectId)
+      const result = await resolveProjectForStartChat(intent)
+      const shouldOpenImportedChat = intent.kind !== "project_id" && result.latestChatId
+      if (shouldOpenImportedChat) {
+        setSelectedProjectId(result.projectId)
+        setPendingChatId(result.latestChatId ?? null)
+        navigate(`/chat/${result.latestChatId}`)
+        setSidebarOpen(false)
+        setCommandError(null)
+        return
+      }
+
+      await createChatForProject(result.projectId)
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
     } finally {

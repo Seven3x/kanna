@@ -21,6 +21,7 @@ interface CreateWsRouterArgs {
   agent: AgentCoordinator
   terminals: TerminalManager
   keybindings: KeybindingsManager
+  importCodexHistoryForProject: (projectId: string, localPath: string) => Promise<{ latestChatId: string | null; importedChatCount: number }>
   refreshDiscovery: () => Promise<DiscoveredProject[]>
   getDiscoveredProjects: () => DiscoveredProject[]
   machineDisplayName: string
@@ -36,6 +37,7 @@ export function createWsRouter({
   agent,
   terminals,
   keybindings,
+  importCodexHistoryForProject,
   refreshDiscovery,
   getDiscoveredProjects,
   machineDisplayName,
@@ -231,15 +233,35 @@ export function createWsRouter({
         case "project.open": {
           await ensureProjectDirectory(command.localPath)
           const project = await store.openProject(command.localPath)
+          const importResult = await importCodexHistoryForProject(project.id, project.localPath)
           await refreshDiscovery()
-          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: { projectId: project.id } })
+          send(ws, {
+            v: PROTOCOL_VERSION,
+            type: "ack",
+            id,
+            result: {
+              projectId: project.id,
+              latestChatId: importResult.latestChatId,
+              importedChatCount: importResult.importedChatCount,
+            },
+          })
           break
         }
         case "project.create": {
           await ensureProjectDirectory(command.localPath)
           const project = await store.openProject(command.localPath, command.title)
+          const importResult = await importCodexHistoryForProject(project.id, project.localPath)
           await refreshDiscovery()
-          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: { projectId: project.id } })
+          send(ws, {
+            v: PROTOCOL_VERSION,
+            type: "ack",
+            id,
+            result: {
+              projectId: project.id,
+              latestChatId: importResult.latestChatId,
+              importedChatCount: importResult.importedChatCount,
+            },
+          })
           break
         }
         case "project.remove": {

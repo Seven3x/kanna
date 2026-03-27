@@ -4,6 +4,17 @@ export interface ProjectRecord extends ProjectSummary {
   deletedAt?: number
 }
 
+export interface ExternalChatRecord {
+  provider: "codex"
+  source: "codex_local_history"
+  externalSessionId: string
+  importedFromPath: string
+  sourceFile: string
+  sourceUpdatedAt: number
+  importedAt: number
+  title: string
+}
+
 export interface ChatRecord {
   id: string
   projectId: string
@@ -16,12 +27,14 @@ export interface ChatRecord {
   sessionToken: string | null
   lastMessageAt?: number
   lastTurnOutcome: "success" | "failed" | "cancelled" | null
+  external: ExternalChatRecord | null
 }
 
 export interface StoreState {
   projectsById: Map<string, ProjectRecord>
   projectIdsByPath: Map<string, string>
   chatsById: Map<string, ChatRecord>
+  chatIdsByExternalSession: Map<string, string>
   messagesByChatId: Map<string, TranscriptEntry[]>
 }
 
@@ -58,6 +71,17 @@ export type ChatEvent =
     }
   | {
       v: 2
+      type: "chat_imported"
+      timestamp: number
+      chatId: string
+      projectId: string
+      title: string
+      provider: AgentProvider
+      sessionToken: string | null
+      external: ExternalChatRecord
+    }
+  | {
+      v: 2
       type: "chat_renamed"
       timestamp: number
       chatId: string
@@ -82,6 +106,13 @@ export type ChatEvent =
       timestamp: number
       chatId: string
       planMode: boolean
+    }
+  | {
+      v: 2
+      type: "chat_external_metadata_set"
+      timestamp: number
+      chatId: string
+      external: ExternalChatRecord
     }
 
 export type MessageEvent = {
@@ -128,11 +159,16 @@ export type TurnEvent =
 
 export type StoreEvent = ProjectEvent | ChatEvent | MessageEvent | TurnEvent
 
+export function externalSessionKey(provider: AgentProvider, externalSessionId: string) {
+  return `${provider}:${externalSessionId}`
+}
+
 export function createEmptyState(): StoreState {
   return {
     projectsById: new Map(),
     projectIdsByPath: new Map(),
     chatsById: new Map(),
+    chatIdsByExternalSession: new Map(),
     messagesByChatId: new Map(),
   }
 }

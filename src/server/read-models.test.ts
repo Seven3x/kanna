@@ -23,6 +23,7 @@ describe("read models", () => {
       planMode: false,
       sessionToken: "thread-1",
       lastTurnOutcome: null,
+      external: null,
     })
 
     const sidebar = deriveSidebarData(state, new Map())
@@ -49,6 +50,7 @@ describe("read models", () => {
       planMode: true,
       sessionToken: "session-1",
       lastTurnOutcome: null,
+      external: null,
     })
 
     const chat = deriveChatSnapshot(state, new Map(), "chat-1")
@@ -82,6 +84,7 @@ describe("read models", () => {
       sessionToken: null,
       lastMessageAt: 100,
       lastTurnOutcome: null,
+      external: null,
     })
 
     const snapshot = deriveLocalProjectsSnapshot(state, [

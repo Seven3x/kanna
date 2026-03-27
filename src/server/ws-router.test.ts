@@ -50,6 +50,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -90,6 +91,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -133,6 +135,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -198,6 +201,7 @@ describe("ws-router", () => {
         onEvent: () => () => {},
       } as never,
       keybindings: keybindings as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -244,7 +248,7 @@ describe("ws-router", () => {
       })
     )
 
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(ws.sent[1]).toEqual({
       v: PROTOCOL_VERSION,
       type: "ack",
@@ -302,6 +306,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -342,7 +347,7 @@ describe("ws-router", () => {
       })
     )
 
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(ws.sent[1]).toEqual({
       v: PROTOCOL_VERSION,
       type: "ack",
@@ -370,7 +375,7 @@ describe("ws-router", () => {
       })
     )
 
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(ws.sent[2]).toEqual({
       v: PROTOCOL_VERSION,
       type: "ack",
@@ -381,6 +386,72 @@ describe("ws-router", () => {
         errorCode: "version_not_live_yet",
         userTitle: "Update not live yet",
         userMessage: "This update is still propagating. Try again in a few minutes.",
+      },
+    })
+  })
+
+  test("project.open triggers Codex history import and returns the latest imported chat", async () => {
+    const imports: Array<{ projectId: string; localPath: string }> = []
+    const router = createWsRouter({
+      store: {
+        state: createEmptyState(),
+        async openProject(localPath: string) {
+          return {
+            id: "project-1",
+            localPath,
+            title: "Project",
+            createdAt: 1,
+            updatedAt: 1,
+          }
+        },
+      } as never,
+      agent: { getActiveStatuses: () => new Map() } as never,
+      terminals: {
+        getSnapshot: () => null,
+        onEvent: () => () => {},
+      } as never,
+      keybindings: {
+        getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
+        onChange: () => () => {},
+      } as never,
+      importCodexHistoryForProject: async (projectId, localPath) => {
+        imports.push({ projectId, localPath })
+        return {
+          latestChatId: "chat-imported-1",
+          importedChatCount: 2,
+        }
+      },
+      refreshDiscovery: async () => [],
+      getDiscoveredProjects: () => [],
+      machineDisplayName: "Local Machine",
+      updateManager: null,
+    })
+    const ws = new FakeWebSocket()
+
+    router.handleMessage(
+      ws as never,
+      JSON.stringify({
+        v: 1,
+        type: "command",
+        id: "project-open-1",
+        command: {
+          type: "project.open",
+          localPath: "/tmp/project",
+        },
+      })
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(imports).toEqual([{ projectId: "project-1", localPath: "/tmp/project" }])
+    expect(ws.sent[0]).toEqual({
+      v: PROTOCOL_VERSION,
+      type: "ack",
+      id: "project-open-1",
+      result: {
+        projectId: "project-1",
+        latestChatId: "chat-imported-1",
+        importedChatCount: 2,
       },
     })
   })

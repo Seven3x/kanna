@@ -50,6 +50,7 @@ That's it. Kanna opens in your browser at [`localhost:3210`](http://localhost:32
 - **Project-first sidebar** — chats grouped under projects, with live status indicators (idle, running, waiting, failed)
 - **Drag-and-drop project ordering** — reorder project groups in the sidebar with persistent ordering
 - **Local project discovery** — auto-discovers projects from both Claude and Codex local history
+- **Codex history import** — when you open a local project, Kanna imports matching `~/.codex/sessions` threads into its own persisted chat store
 - **Rich transcript rendering** — hydrated tool calls, collapsible tool groups, plan mode dialogs, and interactive prompts with full result display
 - **Quick responses** — lightweight structured queries (e.g. title generation) via Haiku with automatic Codex fallback
 - **Plan mode** — review and approve agent plans before execution
@@ -69,14 +70,15 @@ Bun Server (HTTP + WS)
     ├── ProviderCatalog ─── provider/model/effort normalization
     ├── QuickResponseAdapter ─── structured queries with provider fallback
     ├── EventStore ─── JSONL persistence + snapshot compaction
+    ├── CodexHistoryImporter ─── external Codex session import + transcript mapping
     └── ReadModels ─── derived views (sidebar, chat, projects)
     ↕  stdio
 Claude Agent SDK / Codex App Server (local processes)
     ↕
-Local File System (~/.kanna/data/, project dirs)
+Local File System (~/.kanna/data/, ~/.codex/sessions/, project dirs)
 ```
 
-**Key patterns:** Event sourcing for all state mutations. CQRS with separate write (event log) and read (derived snapshots) paths. Reactive broadcasting — subscribers get pushed fresh snapshots on every state change. Multi-provider agent coordination with tool gating for user-approval flows. Provider-agnostic transcript hydration for unified rendering.
+**Key patterns:** Event sourcing for all state mutations. CQRS with separate write (event log) and read (derived snapshots) paths. Reactive broadcasting — subscribers get pushed fresh snapshots on every state change. Multi-provider agent coordination with tool gating for user-approval flows. Provider-agnostic transcript hydration for unified rendering. External Codex history is imported into the same local event store instead of being rendered from a transient in-memory view.
 
 ## Requirements
 
@@ -202,6 +204,14 @@ All state is stored locally at `~/.kanna/data/`:
 | `snapshot.json`  | Compacted state snapshot for fast startup |
 
 Event logs are append-only JSONL. On startup, Kanna replays the log tail after the last snapshot, then compacts if the logs exceed 2 MB.
+
+## Codex Import Notes
+
+- Kanna keeps project discovery and session import separate: discovery finds candidate projects, and opening a project imports matching Codex sessions from `~/.codex/sessions`.
+- Imported Codex threads become normal Kanna chats stored in the local event log, so chat IDs stay stable across refreshes and restarts.
+- Re-import is idempotent: the same external session reuses the existing chat and only appends newly discovered transcript entries.
+- Imported Codex chats bind their original session/thread ID into Kanna's `sessionToken`, so sending another message resumes the original Codex thread when that local session is still resumable.
+- Current import support focuses on user messages, assistant text, tool calls, tool results, interrupts, and selected session metadata. Unsupported Codex record types are skipped best-effort instead of failing the whole import.
 
 ## License
 

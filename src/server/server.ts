@@ -2,6 +2,7 @@ import path from "node:path"
 import { APP_NAME, getRuntimeProfile } from "../shared/branding"
 import { EventStore } from "./event-store"
 import { AgentCoordinator } from "./agent"
+import { CodexHistoryImporter } from "./codex-history"
 import { discoverProjects, type DiscoveredProject } from "./discovery"
 import { KeybindingsManager } from "./keybindings"
 import { getMachineDisplayName } from "./machine-name"
@@ -26,6 +27,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   const hostname = options.host ?? "127.0.0.1"
   const strictPort = options.strictPort ?? false
   const store = new EventStore()
+  const codexHistory = new CodexHistoryImporter()
   const machineDisplayName = getMachineDisplayName()
   await store.initialize()
   let discoveredProjects: DiscoveredProject[] = []
@@ -61,6 +63,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     agent,
     terminals,
     keybindings,
+    importCodexHistoryForProject: async (projectId, localPath) => codexHistory.importSessionsForProject(localPath, projectId, store),
     refreshDiscovery,
     getDiscoveredProjects: () => discoveredProjects,
     machineDisplayName,
