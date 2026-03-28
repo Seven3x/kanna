@@ -47,6 +47,22 @@ export function getDataDirDisplay(env: RuntimeEnv = getRuntimeEnv()) {
   return `${getDataRootDirDisplay(env)}/data`
 }
 
+export function getLogDir(homeDir: string, env: RuntimeEnv = getRuntimeEnv()) {
+  return `${getDataDir(homeDir, env)}/logs`
+}
+
+export function getLogDirDisplay(env: RuntimeEnv = getRuntimeEnv()) {
+  return `${getDataDirDisplay(env)}/logs`
+}
+
+export function getLogFilePath(homeDir: string, env: RuntimeEnv = getRuntimeEnv()) {
+  return `${getLogDir(homeDir, env)}/kanna.log`
+}
+
+export function getLogFilePathDisplay(env: RuntimeEnv = getRuntimeEnv()) {
+  return `${getLogDirDisplay(env)}/kanna.log`
+}
+
 export function getKeybindingsFilePath(homeDir: string, env: RuntimeEnv = getRuntimeEnv()) {
   return `${getDataRootDir(homeDir, env)}/keybindings.json`
 }

@@ -4,12 +4,14 @@ import { useOutletContext } from "react-router-dom"
 import { ChatInput } from "../components/chat-ui/ChatInput"
 import { ChatNavbar } from "../components/chat-ui/ChatNavbar"
 import { RightSidebar } from "../components/chat-ui/RightSidebar"
+import { SubagentDock } from "../components/chat-ui/SubagentDock"
 import { TerminalWorkspace } from "../components/chat-ui/TerminalWorkspace"
 import { ProcessingMessage } from "../components/messages/ProcessingMessage"
 import { Card, CardContent } from "../components/ui/card"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../components/ui/resizable"
 import { ScrollArea } from "../components/ui/scroll-area"
 import { actionMatchesEvent, getResolvedKeybindings } from "../lib/keybindings"
+import { resolveProjectLocalFilePath } from "../lib/projectFiles"
 import { cn } from "../lib/utils"
 import {
   DEFAULT_PROJECT_RIGHT_SIDEBAR_LAYOUT,
@@ -217,6 +219,16 @@ export function ChatPage() {
     return Math.min(RIGHT_SIDEBAR_MAX_SIZE_PERCENT, Math.max(RIGHT_SIDEBAR_MIN_SIZE_PERCENT, size))
   }
 
+  function revealMessage(messageId: string) {
+    const element = document.getElementById(`msg-${messageId}`)
+    if (!element) return
+
+    element.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    })
+  }
+
   const chatCard = (
     <Card ref={chatCardRef} className="bg-background h-full flex flex-col overflow-hidden border-0 rounded-none relative">
       <CardContent className="flex flex-1 min-h-0 flex-col p-0 overflow-hidden relative">
@@ -261,8 +273,17 @@ export function ChatPage() {
                   messages={state.messages}
                   isLoading={state.isProcessing}
                   localPath={state.runtime?.localPath}
+                  projectId={state.runtime?.projectId}
                   latestToolIds={state.latestToolIds}
                   onOpenLocalLink={state.handleOpenLocalLink}
+                  onOpenProjectFile={state.runtime?.localPath
+                    ? (filePath) => {
+                        void state.handleOpenExternalPath(
+                          "open_editor",
+                          resolveProjectLocalFilePath(state.runtime!.localPath, filePath)
+                        )
+                      }
+                    : undefined}
                   onAskUserQuestionSubmit={state.handleAskUserQuestion}
                   onExitPlanModeConfirm={state.handleExitPlanMode}
                 />
@@ -335,6 +356,12 @@ export function ChatPage() {
 
       <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
         <div className="bg-gradient-to-t from-background via-background pointer-events-auto" ref={state.inputRef}>
+          <SubagentDock
+            messages={state.messages}
+            isLoading={state.isProcessing}
+            localPath={state.runtime?.localPath}
+            onRevealMessage={revealMessage}
+          />
           <ChatInput
             ref={chatInputRef}
             key={state.activeChatId ?? "new-chat"}
@@ -477,7 +504,12 @@ export function ChatPage() {
               } as CSSProperties}
             >
               <RightSidebar
+                projectId={projectId}
+                localPath={state.runtime?.localPath}
                 onClose={() => toggleRightSidebar(projectId)}
+                onOpenInEditor={(localPath) => {
+                  void state.handleOpenExternalPath("open_editor", localPath)
+                }}
               />
             </div>
           </ResizablePanel>

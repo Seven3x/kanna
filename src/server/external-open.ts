@@ -28,7 +28,7 @@ export async function openExternal(command: OpenExternalCommand) {
     if (!info) {
       throw new Error(`Path not found: ${resolvedPath}`)
     }
-    const editorCommand = buildEditorCommand({
+    const editorCommand = resolveEditorCommandForExecution({
       localPath: resolvedPath,
       isDirectory: info.isDirectory(),
       line: command.line,
@@ -158,6 +158,57 @@ function resolveEditorExecutable(preset: Exclude<EditorPreset, "custom">, platfo
   }
 
   return { command: preset === "vscode" ? "code" : preset, args: [] }
+}
+
+function resolveEditorCommandForExecution(args: {
+  localPath: string
+  isDirectory: boolean
+  line?: number
+  column?: number
+  editor: EditorOpenSettings
+  platform: NodeJS.Platform
+}): CommandSpec {
+  const editor = normalizeEditorSettings(args.editor)
+  if (editor.preset === "custom") {
+    return buildCustomEditorCommand({
+      commandTemplate: editor.commandTemplate,
+      localPath: args.localPath,
+      line: args.line,
+      column: args.column,
+    })
+  }
+
+  const availablePreset = findAvailableEditorPreset(editor.preset, args.platform)
+  if (!availablePreset) {
+    throw new Error("No supported editor executable was found. Install Cursor, VS Code, or Windsurf, or update the editor setting.")
+  }
+
+  return buildPresetEditorCommand(args, availablePreset)
+}
+
+function findAvailableEditorPreset(
+  preferredPreset: Exclude<EditorPreset, "custom">,
+  platform: NodeJS.Platform
+): Exclude<EditorPreset, "custom"> | null {
+  const candidates = [preferredPreset, ...(["cursor", "vscode", "windsurf"] as const).filter((preset) => preset !== preferredPreset)]
+
+  for (const preset of candidates) {
+    if (isEditorPresetAvailable(preset, platform)) {
+      return preset
+    }
+  }
+
+  return null
+}
+
+function isEditorPresetAvailable(preset: Exclude<EditorPreset, "custom">, platform: NodeJS.Platform) {
+  if (preset === "cursor") {
+    return hasCommand("cursor") || (platform === "darwin" && canOpenMacApp("Cursor"))
+  }
+  if (preset === "vscode") {
+    return hasCommand("code") || (platform === "darwin" && canOpenMacApp("Visual Studio Code"))
+  }
+  return hasCommand("windsurf") || (platform === "darwin" && canOpenMacApp("Windsurf"))
 }
 
 function buildCustomEditorCommand(args: {

@@ -123,25 +123,33 @@ interface ExpandableRowProps {
   children: ReactNode
   expandedContent: ReactNode
   defaultExpanded?: boolean
+  trailingContent?: ReactNode
 }
 
-export function ExpandableRow({ children, expandedContent, defaultExpanded = false }: ExpandableRowProps) {
+export function ExpandableRow({
+  children,
+  expandedContent,
+  defaultExpanded = false,
+  trailingContent,
+}: ExpandableRowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
 
   return (
     <div className="flex flex-col w-full">
-
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className={`group/expandable-row cursor-pointer grid grid-cols-[auto_1fr] items-center gap-1 text-sm ${!expanded ? "hover:opacity-60 transition-opacity" : ""}`}
-      >
-        <div className="grid grid-cols-[auto_1fr] items-center gap-1.5">
-          {children}
-        </div>
-        <ChevronRight
-          className={`h-4.5 w-4.5 text-muted-icon translate-y-[0.5px] transition-all duration-200 opacity-0 group-hover/expandable-row:opacity-100 ${expanded ? "rotate-90 opacity-100" : ""}`}
-        />
-      </button>
+      <div className="flex items-start gap-2">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className={`group/expandable-row min-w-0 flex-1 cursor-pointer grid grid-cols-[auto_1fr] items-center gap-1 text-sm ${!expanded ? "hover:opacity-60 transition-opacity" : ""}`}
+        >
+          <div className="grid min-w-0 grid-cols-[auto_1fr] items-center gap-1.5">
+            {children}
+          </div>
+          <ChevronRight
+            className={`h-4.5 w-4.5 shrink-0 text-muted-icon translate-y-[0.5px] transition-all duration-200 opacity-0 group-hover/expandable-row:opacity-100 ${expanded ? "rotate-90 opacity-100" : ""}`}
+          />
+        </button>
+        {trailingContent ? <div className="flex shrink-0 items-center gap-1">{trailingContent}</div> : null}
+      </div>
       {expanded && expandedContent}
     </div>
   )

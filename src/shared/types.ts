@@ -421,9 +421,12 @@ export interface HydratedToolCallBase<TKind extends string, TInput, TResult> {
   toolName: string
   toolId: string
   input: TInput
+  rawInput?: Record<string, unknown>
   result?: TResult
   rawResult?: unknown
   isError?: boolean
+  debugRaw?: string
+  resultDebugRaw?: string
   timestamp: string
 }
 
@@ -476,8 +479,49 @@ export type HydratedWriteFileToolCall =
 export type HydratedEditFileToolCall =
   HydratedToolCallBase<"edit_file", EditFileToolCall["input"], unknown>
 
+export type HydratedSubagentTaskStatus = "running" | "success" | "error" | "waiting"
+
+export interface SubagentThreadSummary {
+  threadId?: string
+  sessionId?: string
+  title?: string
+  status?: HydratedSubagentTaskStatus
+  providerStatus?: string
+  summary?: string
+  latestMessage?: string
+  messageCount?: number
+}
+
+export interface HydratedSubagentTranscriptPreview {
+  threadId?: string
+  sessionId?: string
+  title?: string
+  status?: HydratedSubagentTaskStatus
+  providerStatus?: string
+  summary?: string
+  messageCount?: number
+  hasMore?: boolean
+  messages: HydratedTranscriptMessage[]
+}
+
+export interface HydratedSubagentTaskResult {
+  status?: HydratedSubagentTaskStatus
+  providerStatus?: string
+  summary?: string
+  latestMessage?: string
+  resultText?: string
+  errorText?: string
+  childThreadId?: string
+  childSessionId?: string
+  childTitle?: string
+  childThreadIds?: string[]
+  messageCount?: number
+  childThreads?: SubagentThreadSummary[]
+  childTranscript?: HydratedSubagentTranscriptPreview
+}
+
 export type HydratedSubagentTaskToolCall =
-  HydratedToolCallBase<"subagent_task", SubagentTaskToolCall["input"], unknown>
+  HydratedToolCallBase<"subagent_task", SubagentTaskToolCall["input"], HydratedSubagentTaskResult>
 
 export type HydratedMcpGenericToolCall =
   HydratedToolCallBase<"mcp_generic", McpGenericToolCall["input"], unknown>

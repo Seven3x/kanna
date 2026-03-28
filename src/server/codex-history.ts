@@ -122,33 +122,33 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asMcpServers(value: unknown): McpServerInfo[] {
   if (!Array.isArray(value)) return []
-  return value
-    .map((entry) => {
-      const record = asRecord(entry)
-      if (!record || typeof record.name !== "string" || typeof record.status !== "string") {
-        return null
-      }
-      return {
-        name: record.name,
-        status: record.status,
-        error: typeof record.error === "string" ? record.error : undefined,
-      } satisfies McpServerInfo
+  const servers: McpServerInfo[] = []
+  for (const entry of value) {
+    const record = asRecord(entry)
+    if (!record || typeof record.name !== "string" || typeof record.status !== "string") {
+      continue
+    }
+    servers.push({
+      name: record.name,
+      status: record.status,
+      error: typeof record.error === "string" ? record.error : undefined,
     })
-    .filter((entry): entry is McpServerInfo => entry !== null)
+  }
+  return servers
 }
 
-function createEntry(
+function createEntry<TEntry extends Omit<TranscriptEntry, "_id" | "createdAt">>(
   sessionId: string,
   lineIndex: number,
   entryIndex: number,
   createdAt: number,
-  entry: Omit<TranscriptEntry, "_id" | "createdAt">
-): TranscriptEntry {
+  entry: TEntry
+): TEntry & Pick<TranscriptEntry, "_id" | "createdAt"> {
   return {
     _id: makeImportedEntryId(sessionId, lineIndex, entryIndex, entry.kind),
     createdAt,
     ...entry,
-  } as TranscriptEntry
+  }
 }
 
 function createSystemInitEntry(
@@ -157,7 +157,7 @@ function createSystemInitEntry(
   createdAt: number,
   model: string,
   payload: Record<string, unknown>
-) {
+): TranscriptEntry {
   return createEntry(sessionId, lineIndex, 0, createdAt, {
     kind: "system_init",
     provider: "codex",
@@ -174,7 +174,7 @@ function assistantEntriesFromMessage(
   lineIndex: number,
   createdAt: number,
   payload: Record<string, unknown>
-) {
+): TranscriptEntry[] {
   const content = Array.isArray(payload.content) ? payload.content : []
   const entries: TranscriptEntry[] = []
 
@@ -219,7 +219,7 @@ function responseItemEntries(
   lineIndex: number,
   createdAt: number,
   payload: Record<string, unknown>
-) {
+): TranscriptEntry[] {
   const payloadType = payload.type
 
   if (payloadType === "message") {
@@ -296,7 +296,7 @@ function eventMessageEntries(
   lineIndex: number,
   createdAt: number,
   payload: Record<string, unknown>
-) {
+): TranscriptEntry[] {
   const payloadType = payload.type
 
   if (payloadType === "user_message" && typeof payload.message === "string" && payload.message.trim()) {

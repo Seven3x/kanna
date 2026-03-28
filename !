@@ -1,0 +1,6 @@
+HTTP_PROXY=http://127.0.0.1:7897
+HTTPS_PROXY=http://127.0.0.1:7897
+ALL_PROXY=http://127.0.0.1:7897
+NO_PROXY=localhost,127.0.0.1
+PATH=/home/roxy/.nvm/versions/node/v22.22.1/bin:/home/roxy/.bun/bin:/usr/local/bin:/usr/bin:/bin
+

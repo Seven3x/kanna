@@ -1,7 +1,7 @@
 import process from "node:process"
 import { spawnSync } from "node:child_process"
 import { hasCommand, spawnDetached } from "./process-utils"
-import { APP_NAME, CLI_COMMAND, getDataDirDisplay, LOG_PREFIX, PACKAGE_NAME } from "../shared/branding"
+import { APP_NAME, CLI_COMMAND, getDataDirDisplay, getLogFilePathDisplay, LOG_PREFIX, PACKAGE_NAME } from "../shared/branding"
 import type { UpdateInstallErrorCode } from "../shared/types"
 import { PROD_SERVER_PORT } from "../shared/ports"
 import { CLI_SUPPRESS_OPEN_ONCE_ENV_VAR } from "./restart"
@@ -232,6 +232,7 @@ export async function runCli(argv: string[], deps: CliRuntimeDeps): Promise<CliR
 
   deps.log(`${LOG_PREFIX} listening on http://${bindHost}:${port}`)
   deps.log(`${LOG_PREFIX} data dir: ${getDataDirDisplay()}`)
+  deps.log(`${LOG_PREFIX} log file: ${getLogFilePathDisplay()}`)
 
   const suppressOpenBrowser = process.env[CLI_SUPPRESS_OPEN_ONCE_ENV_VAR] === "1"
   if (parsedArgs.options.openBrowser && !suppressOpenBrowser) {

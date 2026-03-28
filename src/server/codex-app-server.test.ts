@@ -181,6 +181,69 @@ describe("CodexAppServerManager", () => {
     expect(turnStart?.params.collaborationMode?.settings?.reasoning_effort).toBeNull()
   })
 
+  test("recreates a thread before turn/start when an existing session has no token", async () => {
+    const process = new FakeCodexProcess((message, child) => {
+      if (message.method === "initialize") {
+        child.writeServerMessage({ id: message.id, result: { userAgent: "codex-test" } })
+      } else if (message.method === "thread/start") {
+        child.writeServerMessage({
+          id: message.id,
+          result: { thread: { id: "thread-recovered" }, model: "gpt-5.4", reasoningEffort: "high" },
+        })
+      } else if (message.method === "turn/start") {
+        child.writeServerMessage({
+          id: message.id,
+          result: { turn: { id: "turn-recovered", status: "completed", error: null } },
+        })
+        child.writeServerMessage({
+          method: "turn/completed",
+          params: {
+            threadId: "thread-recovered",
+            turn: { id: "turn-recovered", status: "completed", error: null },
+          },
+        })
+      }
+    })
+
+    const manager = new CodexAppServerManager({
+      spawnProcess: () => process as never,
+    })
+
+    await manager.startSession({
+      chatId: "chat-recover",
+      cwd: "/tmp/project",
+      model: "gpt-5.4",
+      sessionToken: null,
+    })
+
+    const context = (manager as any).sessions.get("chat-recover")
+    context.sessionToken = null
+
+    const turn = await manager.startTurn({
+      chatId: "chat-recover",
+      model: "gpt-5.4",
+      content: "hello",
+      planMode: false,
+      onToolRequest: async () => ({}),
+    })
+
+    await collectStream(turn.stream)
+
+    const methods = process.messages.map((message: any) => message.method).filter(Boolean)
+    expect(methods).toEqual([
+      "initialize",
+      "initialized",
+      "thread/start",
+      "thread/start",
+      "turn/start",
+    ])
+
+    const turnStart = [...process.messages].reverse().find((message: any) => message.method === "turn/start") as
+      | { method: "turn/start"; params: { threadId: string } }
+      | undefined
+    expect(turnStart?.params.threadId).toBe("thread-recovered")
+  })
+
   test("generateStructured returns the final assistant JSON and stops the transient session", async () => {
     const process = new FakeCodexProcess((message, child) => {
       if (message.method === "initialize") {

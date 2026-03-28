@@ -1,19 +1,30 @@
-import { UserRound, X } from "lucide-react"
+import { Download, Eye, X } from "lucide-react"
 import type { ProcessedToolCall } from "./types"
 import { MetaRow, MetaLabel, MetaCodeBlock, ExpandableRow, VerticalLineContainer, getToolIcon } from "./shared"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { stripWorkspacePath } from "../../lib/pathUtils"
 import { AnimatedShinyText } from "../ui/animated-shiny-text"
 import { formatBashCommandTitle, toTitleCase } from "../../lib/formatters"
 import { FileContentView } from "./FileContentView"
+import { SubagentMessage } from "./SubagentMessage"
+import { buildProjectFileRawUrl, getProjectRelativeFilePath } from "../../lib/projectFiles"
+import { Button } from "../ui/button"
+import { ProjectFilePreviewDialog } from "./ProjectFilePreviewDialog"
 
 interface Props {
   message: ProcessedToolCall
   isLoading?: boolean
   localPath?: string | null
+  projectId?: string | null
+  onOpenProjectFile?: (filePath: string) => void
 }
 
-export function ToolCallMessage({ message, isLoading = false, localPath }: Props) {
+export function ToolCallMessage({ message, isLoading = false, localPath, projectId, onOpenProjectFile }: Props) {
+  if (message.toolKind === "subagent_task") {
+    return <SubagentMessage message={message} isLoading={isLoading} localPath={localPath} />
+  }
+
+  const [previewOpen, setPreviewOpen] = useState(false)
   const hasResult = message.result !== undefined
   const showLoadingState = !hasResult && isLoading
 
@@ -53,13 +64,9 @@ export function ToolCallMessage({ message, isLoading = false, localPath }: Props
     if (message.toolKind === "mcp_generic") {
       return `${toTitleCase(message.input.tool)} from ${toTitleCase(message.input.server)}`
     }
-    if (message.toolKind === "subagent_task") {
-      return message.input.subagentType || message.toolName
-    }
     return message.toolName
   }, [message.input, message.toolName, localPath])
 
-  const isAgent = useMemo(() => message.toolKind === "subagent_task", [message.toolKind])
   const description = useMemo(() => {
     if (message.toolKind === "skill") {
       return message.input.skill
@@ -70,6 +77,13 @@ export function ToolCallMessage({ message, isLoading = false, localPath }: Props
   const isWriteTool = message.toolKind === "write_file"
   const isEditTool = message.toolKind === "edit_file"
   const isReadTool = message.toolKind === "read_file"
+  const projectFilePath = useMemo(() => {
+    if (message.toolKind !== "read_file" && message.toolKind !== "write_file" && message.toolKind !== "edit_file") {
+      return null
+    }
+    return getProjectRelativeFilePath(localPath, message.input.filePath)
+  }, [localPath, message])
+  const canPreviewProjectFile = Boolean(projectId && projectFilePath)
 
   const resultText = useMemo(() => {
     if (typeof message.result === "string") return message.result
@@ -95,6 +109,27 @@ export function ToolCallMessage({ message, isLoading = false, localPath }: Props
   return (
     <MetaRow className="w-full">
       <ExpandableRow
+        trailingContent={canPreviewProjectFile ? (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Preview file"
+              onClick={() => setPreviewOpen(true)}
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </Button>
+            <a
+              href={buildProjectFileRawUrl(projectId!, projectFilePath!, true)}
+              download
+              aria-label="Download file"
+              className="touch-manipulation inline-flex h-5.5 w-5.5 items-center justify-center rounded-md border border-border/0 text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-accent-foreground"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </a>
+          </>
+        ) : null}
         expandedContent={
           <VerticalLineContainer className="my-4 text-sm">
             <div className="flex flex-col gap-2">
@@ -147,9 +182,6 @@ export function ToolCallMessage({ message, isLoading = false, localPath }: Props
             if (message.isError) {
               return <X className="size-4 text-destructive" />
             }
-            if (isAgent) {
-              return <UserRound className="size-4 text-muted-icon" />
-            }
             const Icon = getToolIcon(message.toolName)
 
             return <Icon className="size-4 text-muted-icon" />
@@ -167,6 +199,15 @@ export function ToolCallMessage({ message, isLoading = false, localPath }: Props
 
 
       </ExpandableRow>
+      {canPreviewProjectFile ? (
+        <ProjectFilePreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          projectId={projectId!}
+          filePath={projectFilePath!}
+          onOpenInEditor={onOpenProjectFile}
+        />
+      ) : null}
     </MetaRow>
   )
 }

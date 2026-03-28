@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
+import process from "node:process"
 import { createInterface } from "node:readline"
 import type { Readable, Writable } from "node:stream"
 import type { AskUserQuestionItem, CodexReasoningEffort, ServiceTier, TodoItem, TranscriptEntry } from "../shared/types"
@@ -42,6 +43,8 @@ import {
   isServerNotification,
   isServerRequest,
 } from "./codex-app-server-protocol"
+import { appendLocalLog } from "./local-log"
+import { resolveNodeBackedCommand } from "./process-utils"
 
 interface CodexAppServerProcess {
   stdin: Writable
@@ -102,6 +105,11 @@ interface SessionContext {
   sessionToken: string | null
   stderrLines: string[]
   closed: boolean
+}
+
+interface EnsureThreadArgs {
+  model: string
+  serviceTier?: ServiceTier
 }
 
 export interface StartCodexSessionArgs {
@@ -264,6 +272,31 @@ function dynamicToolPayload(value: Record<string, unknown> | unknown[] | string 
   const record = asRecord(value)
   if (record) return record
   return { value }
+}
+
+function resolveCodexExecutable() {
+  const explicit = process.env.KANNA_CODEX_PATH?.trim()
+  if (explicit) {
+    return resolveNodeBackedCommand(explicit) ?? { command: explicit, args: [] }
+  }
+
+  return resolveNodeBackedCommand("codex") ?? { command: "codex", args: [] }
+}
+
+function formatCodexSpawnError(message: string) {
+  const lowered = message.toLowerCase()
+  if (!lowered.includes("codex") || (!lowered.includes("enoent") && !lowered.includes("executable not found"))) {
+    return message
+  }
+
+  return [
+    "Codex CLI was not found in the server environment.",
+    "Make sure `codex` is available from your login shell, or set `KANNA_CODEX_PATH` to the full executable path.",
+  ].join(" ")
+}
+
+function logCodex(message: string, details?: unknown) {
+  appendLocalLog("codex-app-server", message, details)
 }
 
 function webSearchQuery(item: Extract<ThreadItem, { type: "webSearch" }>): string {
@@ -638,17 +671,21 @@ export class CodexAppServerManager {
   private readonly spawnProcess: SpawnCodexAppServer
 
   constructor(args: { spawnProcess?: SpawnCodexAppServer } = {}) {
-    this.spawnProcess = args.spawnProcess ?? ((cwd) =>
-      spawn("codex", ["app-server"], {
+    this.spawnProcess = args.spawnProcess ?? ((cwd) => {
+      const launch = resolveCodexExecutable()
+      logCodex("spawn", { cwd, command: launch.command, args: [...launch.args, "app-server"] })
+      return spawn(launch.command, [...launch.args, "app-server"], {
         cwd,
         stdio: ["pipe", "pipe", "pipe"],
         env: process.env,
-      }) as unknown as CodexAppServerProcess)
+      }) as unknown as CodexAppServerProcess
+    })
   }
 
   async startSession(args: StartCodexSessionArgs) {
     const existing = this.sessions.get(args.chatId)
-    if (existing && !existing.closed && existing.cwd === args.cwd) {
+    if (existing && !existing.closed && existing.cwd === args.cwd && existing.sessionToken) {
+      logCodex("reuse-session", { chatId: args.chatId, cwd: args.cwd, sessionToken: existing.sessionToken })
       return
     }
 
@@ -669,6 +706,13 @@ export class CodexAppServerManager {
     }
     this.sessions.set(args.chatId, context)
     this.attachListeners(context)
+    logCodex("start-session", {
+      chatId: args.chatId,
+      cwd: args.cwd,
+      sessionToken: args.sessionToken,
+      model: args.model,
+      serviceTier: args.serviceTier,
+    })
 
     await this.sendRequest(context, "initialize", {
       clientInfo: {
@@ -684,40 +728,12 @@ export class CodexAppServerManager {
       method: "initialized",
     })
 
-    const threadParams = {
-      model: args.model,
-      cwd: args.cwd,
-      serviceTier: args.serviceTier,
-      approvalPolicy: "never",
-      sandbox: "danger-full-access",
-      experimentalRawEvents: false,
-      persistExtendedHistory: false,
-    } satisfies ThreadStartParams
-
-    let response: ThreadStartResponse | ThreadResumeResponse
-    if (args.sessionToken) {
-      try {
-        response = await this.sendRequest<ThreadResumeResponse>(context, "thread/resume", {
-          threadId: args.sessionToken,
-          model: args.model,
-          cwd: args.cwd,
-          serviceTier: args.serviceTier,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
-          persistExtendedHistory: false,
-        } satisfies ThreadResumeParams)
-      } catch (error) {
-        if (!isRecoverableResumeError(error)) {
-          this.stopSession(args.chatId)
-          throw error
-        }
-        response = await this.sendRequest<ThreadStartResponse>(context, "thread/start", threadParams)
-      }
-    } else {
-      response = await this.sendRequest<ThreadStartResponse>(context, "thread/start", threadParams)
-    }
-
-    context.sessionToken = response.thread.id
+    context.sessionToken = await this.ensureThread(
+      context,
+      { model: args.model, serviceTier: args.serviceTier },
+      args.sessionToken
+    )
+    logCodex("session-ready", { chatId: args.chatId, sessionToken: context.sessionToken })
   }
 
   async startTurn(args: StartCodexTurnArgs): Promise<HarnessTurn> {
@@ -752,8 +768,19 @@ export class CodexAppServerManager {
     context.pendingTurn = pendingTurn
 
     try {
+      const threadId = context.sessionToken
+        ?? await this.ensureThread(context, { model: args.model, serviceTier: args.serviceTier })
+      context.sessionToken = threadId
+      logCodex("start-turn", {
+        chatId: args.chatId,
+        threadId,
+        model: args.model,
+        serviceTier: args.serviceTier,
+        planMode: args.planMode,
+        contentLength: args.content.length,
+      })
       const response = await this.sendRequest<TurnStartResponse>(context, "turn/start", {
-        threadId: context.sessionToken ?? "",
+        threadId,
         input: [
           {
             type: "text",
@@ -877,6 +904,56 @@ export class CodexAppServerManager {
     return context
   }
 
+  private async ensureThread(
+    context: SessionContext,
+    args: EnsureThreadArgs,
+    preferredSessionToken?: string | null
+  ) {
+    const threadParams = {
+      model: args.model,
+      cwd: context.cwd,
+      serviceTier: args.serviceTier,
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+      experimentalRawEvents: false,
+      persistExtendedHistory: false,
+    } satisfies ThreadStartParams
+
+    let response: ThreadStartResponse | ThreadResumeResponse
+    if (preferredSessionToken) {
+      logCodex("ensure-thread:resume", { chatId: context.chatId, preferredSessionToken, cwd: context.cwd, model: args.model })
+      try {
+        response = await this.sendRequest<ThreadResumeResponse>(context, "thread/resume", {
+          threadId: preferredSessionToken,
+          model: args.model,
+          cwd: context.cwd,
+          serviceTier: args.serviceTier,
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+          persistExtendedHistory: false,
+        } satisfies ThreadResumeParams)
+      } catch (error) {
+        if (!isRecoverableResumeError(error)) {
+          logCodex("ensure-thread:resume-failed", { chatId: context.chatId, preferredSessionToken, error: errorMessage(error) })
+          throw error
+        }
+        logCodex("ensure-thread:resume-recoverable", { chatId: context.chatId, preferredSessionToken, error: errorMessage(error) })
+        response = await this.sendRequest<ThreadStartResponse>(context, "thread/start", threadParams)
+      }
+    } else {
+      logCodex("ensure-thread:start", { chatId: context.chatId, cwd: context.cwd, model: args.model })
+      response = await this.sendRequest<ThreadStartResponse>(context, "thread/start", threadParams)
+    }
+
+    const threadId = response.thread.id?.trim()
+    if (!threadId) {
+      logCodex("ensure-thread:invalid-response", { chatId: context.chatId, response })
+      throw new Error("Codex app-server did not return a valid thread id")
+    }
+    logCodex("ensure-thread:ready", { chatId: context.chatId, threadId })
+    return threadId
+  }
+
   private attachListeners(context: SessionContext) {
     const lines = createInterface({ input: context.child.stdout })
     void (async () => {
@@ -905,12 +982,14 @@ export class CodexAppServerManager {
       for await (const line of stderr) {
         if (line.trim()) {
           context.stderrLines.push(line.trim())
+          logCodex("stderr", { chatId: context.chatId, line: line.trim() })
         }
       }
     })()
 
     context.child.on("error", (error) => {
-      this.failContext(context, error.message)
+      logCodex("child-error", { chatId: context.chatId, error: error.message })
+      this.failContext(context, formatCodexSpawnError(error.message))
     })
 
     context.child.on("close", (code) => {
@@ -918,6 +997,7 @@ export class CodexAppServerManager {
       queueMicrotask(() => {
         if (context.closed) return
         const message = context.stderrLines.at(-1) || `Codex app-server exited with code ${code ?? 1}`
+        logCodex("child-close", { chatId: context.chatId, code, message })
         this.failContext(context, message)
       })
     })
@@ -928,9 +1008,11 @@ export class CodexAppServerManager {
     if (!pending) return
     context.pendingRequests.delete(response.id)
     if (response.error) {
+      logCodex("response-error", { chatId: context.chatId, method: pending.method, id: response.id, error: response.error.message })
       pending.reject(new Error(`${pending.method} failed: ${response.error.message ?? "Unknown error"}`))
       return
     }
+    logCodex("response-ok", { chatId: context.chatId, method: pending.method, id: response.id })
     pending.resolve(response.result)
   }
 
@@ -1297,6 +1379,12 @@ export class CodexAppServerManager {
   }
 
   private failContext(context: SessionContext, message: string) {
+    logCodex("fail-context", {
+      chatId: context.chatId,
+      sessionToken: context.sessionToken,
+      pendingTurnId: context.pendingTurn?.turnId ?? null,
+      message,
+    })
     const pendingTurn = context.pendingTurn
     if (pendingTurn && !pendingTurn.resolved) {
       pendingTurn.queue.push({
@@ -1334,6 +1422,7 @@ export class CodexAppServerManager {
       method,
       params,
     })
+    logCodex("request", { chatId: context.chatId, id, method, params })
     return await promise
   }
 

@@ -201,6 +201,7 @@ describe("runCli", () => {
     })
     expect(calls.openUrl).toEqual([])
     expect(calls.log).toContain("[kanna] data dir: ~/.kanna/data")
+    expect(calls.log).toContain("[kanna] log file: ~/.kanna/data/logs/kanna.log")
   })
 
   test("logs the dev data dir when the dev runtime profile is active", async () => {
@@ -210,6 +211,7 @@ describe("runCli", () => {
     await runCli(["--port", "4000", "--no-open"], deps)
 
     expect(calls.log).toContain("[kanna] data dir: ~/.kanna-dev/data")
+    expect(calls.log).toContain("[kanna] log file: ~/.kanna-dev/data/logs/kanna.log")
   })
 
   test("fails fast on unsupported Bun versions", async () => {

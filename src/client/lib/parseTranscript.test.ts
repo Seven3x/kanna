@@ -126,6 +126,183 @@ describe("processTranscriptMessages", () => {
     if (messages[0]?.kind !== "tool") throw new Error("unexpected message")
     expect(messages[0].result).toEqual({ answers: { "Provider?": ["Codex"] } })
   })
+
+  test("hydrates subagent tool results into structured metadata", () => {
+    const messages = processTranscriptMessages([
+      entry({
+        kind: "tool_call",
+        tool: {
+          kind: "tool",
+          toolKind: "subagent_task",
+          toolName: "Task",
+          toolId: "agent-1",
+          input: {
+            subagentType: "spawnAgent",
+          },
+          rawInput: {
+            subagent_type: "spawnAgent",
+            prompt: "Inspect tests",
+            senderThreadId: "thread-1",
+            receiverThreadIds: ["thread-2"],
+          },
+        },
+      }),
+      entry({
+        kind: "tool_result",
+        toolId: "agent-1",
+        content: {
+          type: "collabAgentToolCall",
+          id: "agent-1",
+          tool: "spawnAgent",
+          status: "completed",
+          senderThreadId: "thread-1",
+          receiverThreadIds: ["thread-2"],
+          agentsStates: {
+            "thread-2": {
+              status: "running",
+              message: "Inspecting the test suite",
+            },
+          },
+        },
+      }),
+    ])
+
+    expect(messages[0]?.kind).toBe("tool")
+    if (messages[0]?.kind !== "tool" || messages[0].toolKind !== "subagent_task") {
+      throw new Error("unexpected message")
+    }
+    expect(messages[0].rawInput).toEqual({
+      subagent_type: "spawnAgent",
+      prompt: "Inspect tests",
+      senderThreadId: "thread-1",
+      receiverThreadIds: ["thread-2"],
+    })
+    expect(messages[0].result).toEqual({
+      status: "success",
+      providerStatus: "completed",
+      summary: "Inspecting the test suite",
+      latestMessage: "Inspecting the test suite",
+      resultText: undefined,
+      errorText: undefined,
+      childThreadId: "thread-2",
+      childThreadIds: ["thread-2"],
+      childSessionId: undefined,
+      childTitle: undefined,
+      messageCount: undefined,
+      childThreads: [{
+        threadId: "thread-2",
+        status: "running",
+        providerStatus: "running",
+        latestMessage: "Inspecting the test suite",
+        summary: "Inspecting the test suite",
+      }],
+      childTranscript: undefined,
+    })
+  })
+
+  test("prefers child transcript assistant text for subagent summaries", () => {
+    const childTranscript = [
+      entry({
+        kind: "assistant_text",
+        text: "Checking the repo layout.",
+      }),
+      entry({
+        kind: "assistant_text",
+        text: "Found the failing snapshots and drafted a fix.",
+      }),
+    ]
+
+    const messages = processTranscriptMessages([
+      entry({
+        kind: "tool_call",
+        tool: {
+          kind: "tool",
+          toolKind: "subagent_task",
+          toolName: "Task",
+          toolId: "agent-2",
+          input: {
+            subagentType: "spawnAgent",
+          },
+        },
+      }),
+      entry({
+        kind: "tool_result",
+        toolId: "agent-2",
+        content: {
+          type: "collabAgentToolCall",
+          id: "agent-2",
+          tool: "spawnAgent",
+          status: "completed",
+          receiverThreadIds: ["thread-3"],
+          agentsStates: {
+            "thread-3": {
+              status: "completed",
+              message: "Older state message",
+            },
+          },
+          childTranscript: {
+            threadId: "thread-3",
+            messages: childTranscript,
+          },
+        },
+      }),
+    ])
+
+    expect(messages[0]?.kind).toBe("tool")
+    if (messages[0]?.kind !== "tool" || messages[0].toolKind !== "subagent_task") {
+      throw new Error("unexpected message")
+    }
+    expect(messages[0].result?.summary).toBe("Found the failing snapshots and drafted a fix.")
+    expect(messages[0].result?.messageCount).toBe(2)
+    expect(messages[0].result?.childTranscript?.messages).toHaveLength(2)
+    expect(messages[0].result?.childTranscript?.messages[1]).toMatchObject({
+      kind: "assistant_text",
+      text: "Found the failing snapshots and drafted a fix.",
+    })
+  })
+
+  test("marks errored subagent results as error", () => {
+    const messages = processTranscriptMessages([
+      entry({
+        kind: "tool_call",
+        tool: {
+          kind: "tool",
+          toolKind: "subagent_task",
+          toolName: "Task",
+          toolId: "agent-3",
+          input: {
+            subagentType: "wait",
+          },
+        },
+      }),
+      entry({
+        kind: "tool_result",
+        toolId: "agent-3",
+        isError: true,
+        content: {
+          type: "collabAgentToolCall",
+          id: "agent-3",
+          tool: "wait",
+          status: "failed",
+          receiverThreadIds: ["thread-4"],
+          agentsStates: {
+            "thread-4": {
+              status: "failed",
+              message: "Worker hit a permissions error",
+            },
+          },
+        },
+      }),
+    ])
+
+    expect(messages[0]?.kind).toBe("tool")
+    if (messages[0]?.kind !== "tool" || messages[0].toolKind !== "subagent_task") {
+      throw new Error("unexpected message")
+    }
+    expect(messages[0].isError).toBe(true)
+    expect(messages[0].result?.status).toBe("error")
+    expect(messages[0].result?.errorText).toBe("Worker hit a permissions error")
+  })
 })
 
 describe("getLatestToolIds", () => {

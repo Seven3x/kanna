@@ -1,15 +1,20 @@
 import { X } from "lucide-react"
+import { resolveProjectLocalFilePath } from "../../lib/projectFiles"
+import { ProjectFilesSidebar } from "./ProjectFilesSidebar"
 
 interface RightSidebarProps {
+  projectId: string
+  localPath?: string
   onClose: () => void
+  onOpenInEditor?: (localPath: string) => void
 }
 
-export function RightSidebar({ onClose }: RightSidebarProps) {
+export function RightSidebar({ projectId, localPath, onClose, onOpenInEditor }: RightSidebarProps) {
   return (
     <div className="h-full min-h-0 border-l border-border bg-background md:min-w-[300px]">
       <div className="flex h-full min-h-0 flex-col">
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-          <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">Diffs</div>
+          <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">Project Files</div>
           <button
             type="button"
             aria-label="Close right sidebar"
@@ -20,9 +25,13 @@ export function RightSidebar({ onClose }: RightSidebarProps) {
           </button>
         </div>
 
-        <div className="flex flex-1 items-center justify-center px-6 text-center">
-          <p className="text-sm text-muted-foreground">diffs coming soon</p>
-        </div>
+        <ProjectFilesSidebar
+          projectId={projectId}
+          localPath={localPath}
+          onOpenInEditor={onOpenInEditor && localPath
+            ? (filePath) => onOpenInEditor(resolveProjectLocalFilePath(localPath, filePath))
+            : undefined}
+        />
       </div>
     </div>
   )

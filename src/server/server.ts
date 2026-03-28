@@ -6,6 +6,7 @@ import { CodexHistoryImporter } from "./codex-history"
 import { discoverProjects, type DiscoveredProject } from "./discovery"
 import { KeybindingsManager } from "./keybindings"
 import { getMachineDisplayName } from "./machine-name"
+import { handleProjectFilesRequest } from "./project-files"
 import { TerminalManager } from "./terminal-manager"
 import { UpdateManager } from "./update-manager"
 import type { UpdateInstallAttemptResult } from "./cli-runtime"
@@ -80,7 +81,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
       server = Bun.serve<ClientState>({
         port: actualPort,
         hostname,
-        fetch(req, serverInstance) {
+        async fetch(req, serverInstance) {
           const url = new URL(req.url)
 
           if (url.pathname === "/ws") {
@@ -94,6 +95,11 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
 
           if (url.pathname === "/health") {
             return Response.json({ ok: true, port: actualPort })
+          }
+
+          const projectFilesResponse = await handleProjectFilesRequest(req, store)
+          if (projectFilesResponse) {
+            return projectFilesResponse
           }
 
           return serveStatic(distDir, url.pathname)
