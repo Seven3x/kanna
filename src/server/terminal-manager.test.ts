@@ -34,6 +34,15 @@ async function waitFor(check: () => boolean, timeoutMs: number, intervalMs = 25)
   throw new Error(`Timed out after ${timeoutMs}ms`)
 }
 
+async function waitForOrFalse(check: () => boolean, timeoutMs: number, intervalMs = 25) {
+  try {
+    await waitFor(check, timeoutMs, intervalMs)
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function createSession(terminalId: string) {
   const manager = new TerminalManager()
   let output = ""
@@ -63,6 +72,42 @@ async function createSession(terminalId: string) {
 async function waitForOutputToContain(getOutput: () => string, value: string, timeoutMs = COMMAND_TIMEOUT_MS) {
   await waitFor(() => getOutput().includes(value), timeoutMs)
 }
+
+async function probeCtrlDEofSupport() {
+  if (!isSupportedPlatform) return false
+
+  const projectPath = await mkdtemp(path.join(os.tmpdir(), "kanna-terminal-manager-probe-"))
+  const terminalId = "terminal-ctrl-d-probe"
+  const manager = new TerminalManager()
+  let output = ""
+  manager.onEvent((event) => {
+    if (event.type === "terminal.output" && event.terminalId === terminalId) {
+      output += event.data
+    }
+  })
+
+  try {
+    manager.createTerminal({
+      projectPath,
+      terminalId,
+      cols: 80,
+      rows: 24,
+      scrollback: 1_000,
+    })
+
+    manager.write(terminalId, "echo __KANNA_READY__\r")
+    const isReady = await waitForOrFalse(() => output.includes("__KANNA_READY__"), SHELL_START_TIMEOUT_MS)
+    if (!isReady) return false
+
+    manager.write(terminalId, "\x04")
+    return await waitForOrFalse(() => manager.getSnapshot(terminalId)?.status === "exited", 1_500)
+  } finally {
+    manager.close(terminalId)
+    await rm(projectPath, { recursive: true, force: true })
+  }
+}
+
+const supportsCtrlDEof = await probeCtrlDEofSupport()
 
 describeIfSupported("TerminalManager", () => {
   test("ctrl+c interrupts the foreground job and keeps the shell alive", async () => {
@@ -104,7 +149,7 @@ describeIfSupported("TerminalManager", () => {
     }
   })
 
-  test("ctrl+d preserves eof behavior", async () => {
+  test.skipIf(!supportsCtrlDEof)("ctrl+d preserves eof behavior", async () => {
     const terminalId = "terminal-ctrl-d"
     const { manager } = await createSession(terminalId)
 

@@ -107,6 +107,16 @@ export function resolvePlanModeState(args: {
   }
 }
 
+export function getStoredLockedComposerState(
+  lockedComposerStatesByChatId: Record<string, ComposerState>,
+  chatId: string | null | undefined,
+  activeProvider: AgentProvider | null
+): ComposerState | null {
+  if (!chatId || !activeProvider) return null
+  const candidate = lockedComposerStatesByChatId[chatId]
+  return candidate?.provider === activeProvider ? candidate : null
+}
+
 const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput({
   onSubmit,
   onCancel,
@@ -128,11 +138,10 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   const [value, setValue] = useState(() => (chatId ? getDraft(chatId) : ""))
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isStandalone = useIsStandalone()
-  const [lockedComposerState, setLockedComposerState] = useState<ComposerState | null>(() => (
-    activeProvider ? createLockedComposerState(activeProvider, composerState, providerDefaults) : null
-  ))
+  const [lockedComposerStatesByChatId, setLockedComposerStatesByChatId] = useState<Record<string, ComposerState>>({})
 
   const providerLocked = activeProvider !== null
+  const lockedComposerState = getStoredLockedComposerState(lockedComposerStatesByChatId, chatId, activeProvider)
   const providerPrefs = providerLocked
     ? lockedComposerState ?? createLockedComposerState(activeProvider, composerState, providerDefaults)
     : composerState
@@ -178,12 +187,20 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
 
   useEffect(() => {
     if (activeProvider === null) {
-      setLockedComposerState(null)
       return
     }
 
-    setLockedComposerState(createLockedComposerState(activeProvider, composerState, providerDefaults))
-  }, [activeProvider, chatId])
+    if (!chatId) return
+
+    setLockedComposerStatesByChatId((current) => {
+      const existing = current[chatId]
+      if (existing?.provider === activeProvider) return current
+      return {
+        ...current,
+        [chatId]: createLockedComposerState(activeProvider, composerState, providerDefaults),
+      }
+    })
+  }, [activeProvider, chatId, composerState, providerDefaults])
 
   useEffect(() => {
     logChatInput("resolved provider state", {
@@ -199,9 +216,37 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
     })
   }, [activeProvider, chatId, composerState.model, composerState.provider, lockedComposerState?.provider, providerLocked, providerPrefs.model, providerPrefs.provider, selectedProvider])
 
+  function updateLockedComposerState(update: (current: ComposerState | null) => ComposerState | null) {
+    if (!providerLocked || !chatId) return
+    setLockedComposerStatesByChatId((current) => {
+      const next = update(getStoredLockedComposerState(current, chatId, activeProvider))
+      if (!next) {
+        if (!(chatId in current)) return current
+        const { [chatId]: _removed, ...rest } = current
+        return rest
+      }
+
+      const existing = current[chatId]
+      if (
+        existing
+        && existing.provider === next.provider
+        && existing.model === next.model
+        && existing.planMode === next.planMode
+        && JSON.stringify(existing.modelOptions) === JSON.stringify(next.modelOptions)
+      ) {
+        return current
+      }
+
+      return {
+        ...current,
+        [chatId]: next,
+      }
+    })
+  }
+
   function setReasoningEffort(reasoningEffort: string) {
     if (providerLocked) {
-      setLockedComposerState((current) => {
+      updateLockedComposerState((current) => {
         const next = current ?? createLockedComposerState(selectedProvider, composerState, providerDefaults)
         if (next.provider === "claude") {
           return {
@@ -228,7 +273,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
 
   function setClaudeContextWindow(contextWindow: ClaudeContextWindow) {
     if (providerLocked) {
-      setLockedComposerState((current) => {
+      updateLockedComposerState((current) => {
         const next = current ?? createLockedComposerState(selectedProvider, composerState, providerDefaults)
         if (next.provider !== "claude") return next
         const normalizedContextWindow = normalizeClaudeContextWindow(next.model, contextWindow)
@@ -258,7 +303,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
     })
 
     if (nextState.lockedComposerState !== lockedComposerState) {
-      setLockedComposerState(nextState.lockedComposerState)
+      updateLockedComposerState(() => nextState.lockedComposerState)
     }
     if (nextState.composerPlanMode !== composerState.planMode) {
       setComposerPlanMode(nextState.composerPlanMode)
@@ -385,7 +430,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
             }}
             onModelChange={(_, model) => {
               if (providerLocked) {
-                setLockedComposerState((current) => {
+                updateLockedComposerState((current) => {
                   const next = current ?? createLockedComposerState(selectedProvider, composerState, providerDefaults)
                   if (next.provider === "claude") {
                     const normalizedContextWindow = normalizeClaudeContextWindow(model, next.modelOptions.contextWindow)
@@ -412,7 +457,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
             onCodexReasoningEffortChange={(effort) => setReasoningEffort(effort)}
             onCodexFastModeChange={(fastMode) => {
               if (providerLocked) {
-                setLockedComposerState((current) => {
+                updateLockedComposerState((current) => {
                   const next = current ?? createLockedComposerState(selectedProvider, composerState, providerDefaults)
                   if (next.provider === "claude") return next
                   return {

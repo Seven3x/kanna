@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { resolvePlanModeState } from "./ChatInput"
+import { getStoredLockedComposerState, resolvePlanModeState } from "./ChatInput"
 import { useChatPreferencesStore } from "../../stores/chatPreferencesStore"
 
 const INITIAL_STATE = useChatPreferencesStore.getInitialState()
@@ -83,5 +83,38 @@ describe("resolvePlanModeState", () => {
       modelOptions: { reasoningEffort: "high", contextWindow: "200k" },
       planMode: false,
     })
+  })
+})
+
+describe("getStoredLockedComposerState", () => {
+  test("returns the cached state for the selected chat when the provider matches", () => {
+    const result = getStoredLockedComposerState({
+      "chat-1": {
+        provider: "codex",
+        model: "gpt-5.4",
+        modelOptions: { reasoningEffort: "low", fastMode: false },
+        planMode: false,
+      },
+    }, "chat-1", "codex")
+
+    expect(result).toEqual({
+      provider: "codex",
+      model: "gpt-5.4",
+      modelOptions: { reasoningEffort: "low", fastMode: false },
+      planMode: false,
+    })
+  })
+
+  test("ignores cached state from another provider", () => {
+    const result = getStoredLockedComposerState({
+      "chat-1": {
+        provider: "claude",
+        model: "sonnet",
+        modelOptions: { reasoningEffort: "high", contextWindow: "200k" },
+        planMode: false,
+      },
+    }, "chat-1", "codex")
+
+    expect(result).toBeNull()
   })
 })
