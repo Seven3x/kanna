@@ -282,6 +282,7 @@ export function ChatPage() {
                   isLoading={state.isProcessing}
                   localPath={state.runtime?.localPath}
                   projectId={state.runtime?.projectId}
+                  skills={state.currentProjectSkills}
                   latestToolIds={state.latestToolIds}
                   onOpenLocalLink={state.handleOpenLocalLink}
                   onOpenProjectFile={state.runtime?.localPath
@@ -382,6 +383,7 @@ export function ChatPage() {
             chatId={state.activeChatId}
             activeProvider={state.runtime?.provider ?? null}
             availableProviders={state.availableProviders}
+            skills={state.currentProjectSkills}
           />
         </div>
       </div>
@@ -510,6 +512,7 @@ export function ChatPage() {
               <RightSidebar
                 projectId={projectId}
                 localPath={state.runtime?.localPath}
+                skills={state.runtime?.skills}
                 onClose={() => toggleRightSidebar(projectId)}
                 onOpenInEditor={(localPath) => {
                   void state.handleOpenExternalPath("open_editor", localPath)

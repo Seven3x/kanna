@@ -3,13 +3,35 @@ import type {
   ChatSnapshot,
   KannaStatus,
   LocalProjectsSnapshot,
+  ProjectSkillSummary,
   SidebarChatRow,
   SidebarData,
   SidebarProjectGroup,
 } from "../shared/types"
 import type { ChatRecord, StoreState } from "./events"
+import { discoverProjectSkills } from "./discovery"
 import { resolveLocalPath } from "./paths"
 import { SERVER_PROVIDERS } from "./provider-catalog"
+
+function discoveredSkillsByPath(
+  discoveredProjects: Array<{ localPath: string; skills?: ProjectSkillSummary[] }>
+) {
+  return new Map(
+    discoveredProjects.map((project) => [resolveLocalPath(project.localPath), project.skills ?? []] as const)
+  )
+}
+
+function resolveProjectSkills(
+  projectLocalPath: string,
+  skillsByPath: Map<string, ProjectSkillSummary[]>
+) {
+  const normalizedPath = resolveLocalPath(projectLocalPath)
+  const discoveredSkills = skillsByPath.get(normalizedPath)
+  if (discoveredSkills && discoveredSkills.length > 0) {
+    return discoveredSkills
+  }
+  return discoverProjectSkills(normalizedPath)
+}
 
 export function deriveStatus(chat: ChatRecord, activeStatus?: KannaStatus): KannaStatus {
   if (activeStatus) return activeStatus
@@ -53,10 +75,11 @@ export function deriveSidebarData(
 
 export function deriveLocalProjectsSnapshot(
   state: StoreState,
-  discoveredProjects: Array<{ localPath: string; title: string; modifiedAt: number }>,
+  discoveredProjects: Array<{ localPath: string; title: string; modifiedAt: number; skills?: ProjectSkillSummary[] }>,
   machineName: string
 ): LocalProjectsSnapshot {
   const projects = new Map<string, LocalProjectsSnapshot["projects"][number]>()
+  const skillsByPath = discoveredSkillsByPath(discoveredProjects)
 
   for (const project of discoveredProjects) {
     const normalizedPath = resolveLocalPath(project.localPath)
@@ -66,6 +89,7 @@ export function deriveLocalProjectsSnapshot(
       source: "discovered",
       lastOpenedAt: project.modifiedAt,
       chatCount: 0,
+      skills: project.skills ?? [],
     })
   }
 
@@ -82,6 +106,7 @@ export function deriveLocalProjectsSnapshot(
       source: "saved",
       lastOpenedAt,
       chatCount: chats.length,
+      skills: resolveProjectSkills(project.localPath, skillsByPath),
     })
   }
 
@@ -98,12 +123,14 @@ export function deriveChatSnapshot(
   state: StoreState,
   activeStatuses: Map<string, KannaStatus>,
   chatId: string,
-  getMessages: (chatId: string) => ChatSnapshot["messages"]
+  getMessages: (chatId: string) => ChatSnapshot["messages"],
+  discoveredProjects: Array<{ localPath: string; title?: string; modifiedAt?: number; skills?: ProjectSkillSummary[] }> = []
 ): ChatSnapshot | null {
   const chat = state.chatsById.get(chatId)
   if (!chat || chat.deletedAt) return null
   const project = state.projectsById.get(chat.projectId)
   if (!project || project.deletedAt) return null
+  const skillsByPath = discoveredSkillsByPath(discoveredProjects)
 
   const runtime: ChatRuntime = {
     chatId: chat.id,
@@ -114,6 +141,7 @@ export function deriveChatSnapshot(
     provider: chat.provider,
     planMode: chat.planMode,
     sessionToken: chat.sessionToken,
+    skills: resolveProjectSkills(project.localPath, skillsByPath),
   }
 
   return {

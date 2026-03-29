@@ -1,6 +1,6 @@
 import React, { useMemo } from "react"
 import type { AskUserQuestionItem, ProcessedToolCall } from "./types"
-import type { AskUserQuestionAnswerMap, HydratedTranscriptMessage } from "../../../shared/types"
+import type { AskUserQuestionAnswerMap, HydratedTranscriptMessage, ProjectSkillSummary } from "../../../shared/types"
 import { getLatestToolIds } from "../../app/derived"
 import { UserMessage } from "./UserMessage"
 import { RawJsonMessage } from "./RawJsonMessage"
@@ -65,6 +65,7 @@ interface TranscriptMessageListProps {
   isLoading: boolean
   localPath?: string
   projectId?: string
+  skills?: ProjectSkillSummary[]
   latestToolIds?: Record<string, string | null>
   onAskUserQuestionSubmit?: (
     toolUseId: string,
@@ -89,6 +90,7 @@ export function TranscriptMessageList({
   isLoading,
   localPath,
   projectId,
+  skills = [],
   latestToolIds,
   onAskUserQuestionSubmit,
   onExitPlanModeConfirm,
@@ -102,10 +104,9 @@ export function TranscriptMessageList({
     () => latestToolIds ?? (readOnly ? EMPTY_LATEST_TOOL_IDS : getLatestToolIds(messages)),
     [latestToolIds, messages, readOnly]
   )
-
   function renderMessage(message: HydratedTranscriptMessage, index: number): React.ReactNode {
     if (message.kind === "user_prompt") {
-      return <UserMessage key={message.id} content={message.content} />
+      return <UserMessage key={message.id} content={message.content} skills={skills} />
     }
 
     switch (message.kind) {
@@ -120,7 +121,7 @@ export function TranscriptMessageList({
         return isFirst ? <AccountInfoMessage key={message.id} message={message} /> : null
       }
       case "assistant_text":
-        return <TextMessage key={message.id} message={message} />
+        return <TextMessage key={message.id} message={message} skills={skills} />
       case "tool":
         if (message.toolKind === "ask_user_question" && !readOnly) {
           return (

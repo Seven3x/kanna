@@ -167,6 +167,17 @@ export interface ProjectSummary {
   updatedAt: number
 }
 
+export interface ProjectSkillSummary {
+  name: string
+  description?: string
+  source?: string
+  sourceType?: string
+  scope?: "project" | "global"
+  relativePath?: string
+  filePath?: string
+  pathDisplay?: string
+}
+
 export interface SidebarChatRow {
   _id: string
   _creationTime: number
@@ -195,6 +206,7 @@ export interface LocalProjectSummary {
   source: "saved" | "discovered"
   lastOpenedAt?: number
   chatCount: number
+  skills?: ProjectSkillSummary[]
 }
 
 export interface LocalProjectsSnapshot {
@@ -606,6 +618,7 @@ export interface ChatRuntime {
   provider: AgentProvider | null
   planMode: boolean
   sessionToken: string | null
+  skills?: ProjectSkillSummary[]
 }
 
 export interface ChatSnapshot {

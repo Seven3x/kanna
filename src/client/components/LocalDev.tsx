@@ -9,6 +9,7 @@ import {
   Loader2,
   Monitor,
   Plus,
+  Sparkles,
   SquarePen,
   Terminal,
 } from "lucide-react"
@@ -127,10 +128,12 @@ function Step({
 
 function ProjectCard({
   localPath,
+  skills = [],
   loading,
   onClick,
 }: {
   localPath: string
+  skills?: LocalProjectsSnapshot["projects"][number]["skills"]
   loading: boolean
   onClick: () => void
 }) {
@@ -146,9 +149,20 @@ function ProjectCard({
           onClick={onClick}
         >
           <Folder className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-          <span className="font-medium text-foreground truncate flex-1">
-            {getPathBasename(localPath)}
-          </span>
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-foreground truncate">
+              {getPathBasename(localPath)}
+            </div>
+            {skills.length > 0 ? (
+              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />
+                  {skills.length} skill{skills.length === 1 ? "" : "s"}
+                </span>
+                <span className="truncate">{skills.slice(0, 2).map((skill) => skill.name).join(", ")}</span>
+              </div>
+            ) : null}
+          </div>
           {loading ? (
             <Loader2 className="h-4 w-4 text-muted-foreground group-hover:text-primary animate-spin flex-shrink-0" />
           ) : (
@@ -279,6 +293,7 @@ export function LocalDev({
                   <ProjectCard
                     key={project.localPath}
                     localPath={project.localPath}
+                    skills={project.skills}
                     loading={startingLocalPath === project.localPath}
                     onClick={() => {
                       void onOpenProject(project.localPath)

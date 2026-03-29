@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
-import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type KeybindingsSnapshot, type ModelOptions, type ProviderCatalogEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
+import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type KeybindingsSnapshot, type ModelOptions, type ProjectSkillSummary, type ProviderCatalogEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
 import { useChatPreferencesStore } from "../stores/chatPreferencesStore"
 import { useRightSidebarStore } from "../stores/rightSidebarStore"
 import { useTerminalLayoutStore } from "../stores/terminalLayoutStore"
@@ -153,6 +153,7 @@ export interface KannaState {
   messages: ReturnType<typeof processTranscriptMessages>
   latestToolIds: ReturnType<typeof getLatestToolIds>
   runtime: ChatSnapshot["runtime"] | null
+  currentProjectSkills: ProjectSkillSummary[]
   availableProviders: ProviderCatalogEntry[]
   isProcessing: boolean
   canCancel: boolean
@@ -408,6 +409,12 @@ export function useKannaState(activeChatId: string | null): KannaState {
     ?? sidebarData.projectGroups[0]?.groupKey
     ?? fallbackLocalProjectPath
   )
+  const selectedProjectLocalPath = selectedProjectId
+    ? sidebarData.projectGroups.find((group) => group.groupKey === selectedProjectId)?.localPath ?? null
+    : null
+  const currentProjectSkills = runtime?.skills
+    ?? localProjects?.projects.find((project) => project.localPath === selectedProjectLocalPath)?.skills
+    ?? []
 
   useLayoutEffect(() => {
     if (initialScrollCompletedRef.current) return
@@ -793,6 +800,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     messages,
     latestToolIds,
     runtime,
+    currentProjectSkills,
     availableProviders,
     isProcessing,
     canCancel,

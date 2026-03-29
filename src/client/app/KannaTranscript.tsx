@@ -1,5 +1,5 @@
 import type { AskUserQuestionItem } from "../components/messages/types"
-import type { AskUserQuestionAnswerMap, HydratedTranscriptMessage } from "../../shared/types"
+import type { AskUserQuestionAnswerMap, HydratedTranscriptMessage, ProjectSkillSummary } from "../../shared/types"
 import { OpenLocalLinkProvider } from "../components/messages/shared"
 import { TranscriptMessageList } from "../components/messages/TranscriptMessageList"
 import { CHAT_SELECTION_ZONE_ATTRIBUTE } from "./chatFocusPolicy"
@@ -9,6 +9,7 @@ interface KannaTranscriptProps {
   isLoading: boolean
   localPath?: string
   projectId?: string
+  skills?: ProjectSkillSummary[]
   latestToolIds: Record<string, string | null>
   onOpenLocalLink: (target: { path: string; line?: number; column?: number }) => void
   onOpenProjectFile?: (path: string) => void
@@ -25,6 +26,7 @@ export function KannaTranscript({
   isLoading,
   localPath,
   projectId,
+  skills,
   latestToolIds,
   onOpenLocalLink,
   onOpenProjectFile,
@@ -38,6 +40,7 @@ export function KannaTranscript({
         isLoading={isLoading}
         localPath={localPath}
         projectId={projectId}
+        skills={skills}
         latestToolIds={latestToolIds}
         onOpenProjectFile={onOpenProjectFile}
         onAskUserQuestionSubmit={onAskUserQuestionSubmit}

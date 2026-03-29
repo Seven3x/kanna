@@ -5,6 +5,7 @@ import path from "node:path"
 import {
   ClaudeProjectDiscoveryAdapter,
   CodexProjectDiscoveryAdapter,
+  discoverGlobalSkills,
   discoverProjects,
   type ProjectDiscoveryAdapter,
 } from "./discovery"
@@ -46,6 +47,7 @@ describe("project discovery", () => {
         localPath: projectDir,
         title: "alpha-project",
         modifiedAt: new Date("2026-03-16T10:00:00.000Z").getTime(),
+        skills: [],
       },
     ])
   })
@@ -114,6 +116,7 @@ describe("project discovery", () => {
         localPath: liveProjectDir,
         title: "kanna",
         modifiedAt: Date.parse("2026-03-16T23:05:58.940134Z"),
+        skills: [],
       },
     ])
   })
@@ -200,11 +203,94 @@ describe("project discovery", () => {
         localPath: "/tmp/project",
         title: "Codex Project",
         modifiedAt: 20,
+        skills: [],
       },
       {
         localPath: "/tmp/other-project",
         title: "Other Project",
         modifiedAt: 15,
+        skills: [],
+      },
+    ])
+  })
+
+  test("discovers project skills from skills-lock.json and local SKILL.md files", () => {
+    const homeDir = makeTempDir()
+    const projectDir = path.join(homeDir, "workspace", "skills-project")
+    const claudeProjectsDir = path.join(homeDir, ".claude", "projects")
+    const projectMarkerDir = path.join(claudeProjectsDir, encodeClaudeProjectPath(projectDir))
+
+    mkdirSync(path.join(projectDir, ".agents", "skills", "local-helper"), { recursive: true })
+    mkdirSync(projectMarkerDir, { recursive: true })
+    writeFileSync(path.join(projectDir, "skills-lock.json"), JSON.stringify({
+      version: 1,
+      skills: {
+        shadcn: {
+          source: "shadcn/ui",
+          sourceType: "github",
+        },
+      },
+    }, null, 2))
+    writeFileSync(path.join(projectDir, ".agents", "skills", "local-helper", "SKILL.md"), [
+      "---",
+      "name: local-helper",
+      "description: Helps with local project workflows.",
+      "---",
+      "",
+      "# Local Helper",
+    ].join("\n"))
+
+    const projects = new ClaudeProjectDiscoveryAdapter().scan(homeDir)
+
+    expect(projects[0]?.skills).toEqual([
+      {
+        name: "local-helper",
+        description: "Helps with local project workflows.",
+        scope: "project",
+        filePath: path.join(projectDir, ".agents", "skills", "local-helper", "SKILL.md"),
+        relativePath: ".agents/skills/local-helper/SKILL.md",
+        pathDisplay: ".agents/skills/local-helper/SKILL.md",
+      },
+      {
+        name: "shadcn",
+        source: "shadcn/ui",
+        sourceType: "github",
+        scope: "project",
+      },
+    ])
+  })
+
+  test("discovers recursive global skills from codex and agents homes", () => {
+    const homeDir = makeTempDir()
+    mkdirSync(path.join(homeDir, ".codex", "skills", ".system", "openai-docs"), { recursive: true })
+    mkdirSync(path.join(homeDir, ".agents", "skills", "pua"), { recursive: true })
+    writeFileSync(path.join(homeDir, ".codex", "skills", ".system", "openai-docs", "SKILL.md"), [
+      "---",
+      "name: openai-docs",
+      "description: Official OpenAI docs helper.",
+      "---",
+    ].join("\n"))
+    writeFileSync(path.join(homeDir, ".agents", "skills", "pua", "SKILL.md"), [
+      "---",
+      "name: pua",
+      "description: Pushes the agent harder.",
+      "---",
+    ].join("\n"))
+
+    expect(discoverGlobalSkills(homeDir)).toEqual([
+      {
+        name: "openai-docs",
+        description: "Official OpenAI docs helper.",
+        scope: "global",
+        filePath: path.join(homeDir, ".codex", "skills", ".system", "openai-docs", "SKILL.md"),
+        pathDisplay: "~/.codex/skills/.system/openai-docs/SKILL.md",
+      },
+      {
+        name: "pua",
+        description: "Pushes the agent harder.",
+        scope: "global",
+        filePath: path.join(homeDir, ".agents", "skills", "pua", "SKILL.md"),
+        pathDisplay: "~/.agents/skills/pua/SKILL.md",
       },
     ])
   })

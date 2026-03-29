@@ -15,7 +15,7 @@ import {
   CheckLine,
   ChevronRight,
   ListTodo,
-  Map,
+  Map as MapIcon,
   MessageCircleQuestion,
   Pencil,
   Search,
@@ -31,7 +31,9 @@ import {
   Check,
 } from "lucide-react"
 import { cn } from "../../lib/utils"
+import { createSkillHref, parseSkillHref, splitTextWithSkillMentions } from "../../lib/skills"
 import { parseLocalFileLink } from "../../lib/pathUtils"
+import type { ProjectSkillSummary } from "../../../shared/types"
 
 type OpenLocalLinkTarget = { path: string; line?: number; column?: number }
 type OpenLocalLinkHandler = (target: OpenLocalLinkTarget) => void
@@ -61,7 +63,7 @@ export const toolIcons: Record<string, LucideIcon> = {
   Bash: Terminal,
   Glob: Search,
   Grep: Search,
-  ExitPlanMode: Map,
+  ExitPlanMode: MapIcon,
   Read: File,
   Edit: FilePen,
   Write: FilePlusCorner,
@@ -72,7 +74,7 @@ export const toolIcons: Record<string, LucideIcon> = {
   KillShell: SquareX,
   AskUserQuestion: MessageCircleQuestion,
   Skill: Sparkles,
-  EnterPlanMode: Map,
+  EnterPlanMode: MapIcon,
 }
 
 export const defaultToolIcon: LucideIcon = ToyBrick
@@ -365,14 +367,78 @@ export const markdownComponents = {
   ),
 }
 
+function transformSkillMentions(node: unknown, skillNames: string[]) {
+  if (!node || typeof node !== "object") return
+  const candidate = node as { type?: string; children?: unknown[] }
+  if (!Array.isArray(candidate.children)) return
+
+  for (let index = 0; index < candidate.children.length; index += 1) {
+    const child = candidate.children[index]
+    if (!child || typeof child !== "object") continue
+
+    const childNode = child as { type?: string; value?: string; children?: unknown[] }
+    if (
+      childNode.type === "text"
+      && typeof childNode.value === "string"
+      && candidate.type !== "link"
+      && candidate.type !== "inlineCode"
+      && candidate.type !== "code"
+    ) {
+      const parts = splitTextWithSkillMentions(childNode.value, skillNames)
+      const hasSkillMention = parts.some((part) => part.type === "skill")
+      if (!hasSkillMention) continue
+
+      const replacement = parts.map((part) => part.type === "skill"
+        ? {
+            type: "link",
+            url: createSkillHref(part.name),
+            children: [{ type: "text", value: part.value }],
+          }
+        : {
+            type: "text",
+            value: part.value,
+          })
+
+      candidate.children.splice(index, 1, ...replacement)
+      index += replacement.length - 1
+      continue
+    }
+
+    transformSkillMentions(child, skillNames)
+  }
+}
+
+export function createSkillMentionsRemarkPlugin(skillNames: string[]) {
+  return function skillMentionsRemarkPlugin() {
+    return (tree: unknown) => {
+      if (!skillNames.length) return
+      transformSkillMentions(tree, skillNames)
+    }
+  }
+}
+
 export function createMarkdownComponents(options?: {
   onOpenLocalLink?: OpenLocalLinkHandler
+  skills?: ProjectSkillSummary[]
 }) {
+  const skillDescriptions = new Map((options?.skills ?? []).map((skill) => [skill.name, skill.description]))
   return {
     ...markdownComponents,
     a: ({ children, href, onClick, ...props }: ComponentPropsWithoutRef<"a">) => {
       const onOpenLocalLink = options?.onOpenLocalLink ?? useContext(OpenLocalLinkContext)
+      const parsedSkillLink = parseSkillHref(href)
       const parsedLocalLink = parseLocalFileLink(href)
+
+      if (parsedSkillLink) {
+        return (
+          <span
+            className="inline-flex items-center rounded-full border border-border/70 bg-muted/80 px-2 py-0.5 text-xs font-medium text-foreground no-underline"
+            title={skillDescriptions.get(parsedSkillLink) || `Skill: ${parsedSkillLink}`}
+          >
+            {children}
+          </span>
+        )
+      }
 
       return (
         <a

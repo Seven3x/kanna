@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { createMarkdownComponents, markdownComponents, OpenLocalLinkProvider } from "./shared"
+import { createMarkdownComponents, createSkillMentionsRemarkPlugin, markdownComponents, OpenLocalLinkProvider } from "./shared"
 
 describe("markdownComponents", () => {
   test("renders markdown headings with transcript-specific sizes and no bold weight", () => {
@@ -75,5 +75,20 @@ describe("markdownComponents", () => {
 
     expect(html).toContain("/Users/jake/Projects/kanna/src/client/app/App.tsx#L1")
     expect(html).not.toContain('target="_blank"')
+  })
+
+  test("renders skill mentions as highlighted badges", () => {
+    const html = renderToStaticMarkup(
+      <Markdown
+        remarkPlugins={[remarkGfm, createSkillMentionsRemarkPlugin(["openai-docs"])]}
+        components={createMarkdownComponents()}
+      >
+        {"Use $openai-docs to look this up."}
+      </Markdown>
+    )
+
+    expect(html).toContain("Skill: openai-docs")
+    expect(html).toContain("$openai-docs")
+    expect(html).toContain("bg-muted/80")
   })
 })

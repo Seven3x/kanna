@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { getStoredLockedComposerState, resolvePlanModeState } from "./ChatInput"
+import React from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { getStoredLockedComposerState, resolvePlanModeState, ChatInput } from "./ChatInput"
 import { useChatPreferencesStore } from "../../stores/chatPreferencesStore"
+import { useChatInputStore } from "../../stores/chatInputStore"
+import { PROVIDERS } from "../../../shared/types"
 
 const INITIAL_STATE = useChatPreferencesStore.getInitialState()
 
 afterEach(() => {
   useChatPreferencesStore.setState(INITIAL_STATE)
+  useChatInputStore.setState({ drafts: {} })
 })
 
 describe("resolvePlanModeState", () => {
@@ -116,5 +121,36 @@ describe("getStoredLockedComposerState", () => {
     }, "chat-1", "codex")
 
     expect(result).toBeNull()
+  })
+})
+
+describe("ChatInput", () => {
+  test("renders highlighted skill badges with hover descriptions for existing skill mentions", () => {
+    useChatInputStore.setState({
+      drafts: {
+        "chat-1": "Use $openai-docs here",
+      },
+    })
+
+    const html = renderToStaticMarkup(
+      React.createElement(ChatInput, {
+        onSubmit: async () => {},
+        disabled: false,
+        chatId: "chat-1",
+        activeProvider: null,
+        availableProviders: PROVIDERS,
+        skills: [
+          {
+            name: "openai-docs",
+            description: "Official OpenAI docs helper",
+          },
+        ],
+      })
+    )
+
+    expect(html).toContain('data-skill-name="openai-docs"')
+    expect(html).toContain('data-skill-description="Official OpenAI docs helper"')
+    expect(html).toContain('title="Official OpenAI docs helper"')
+    expect(html).toContain("$openai-docs")
   })
 })
