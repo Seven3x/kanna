@@ -16,6 +16,7 @@ export interface StartKannaServerOptions {
   port?: number
   host?: string
   strictPort?: boolean
+  onMigrationProgress?: (message: string) => void
   update?: {
     version: string
     fetchLatestVersion: (packageName: string) => Promise<string>
@@ -31,6 +32,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   const codexHistory = new CodexHistoryImporter()
   const machineDisplayName = getMachineDisplayName()
   await store.initialize()
+  await store.migrateLegacyTranscripts(options.onMigrationProgress)
   let discoveredProjects: DiscoveredProject[] = []
 
   async function refreshDiscovery() {

@@ -213,6 +213,16 @@ Event logs are append-only JSONL. On startup, Kanna replays the log tail after t
 - Imported Codex chats bind their original session/thread ID into Kanna's `sessionToken`, so sending another message resumes the original Codex thread when that local session is still resumable.
 - Current import support focuses on user messages, assistant text, tool calls, tool results, interrupts, and selected session metadata. Unsupported Codex record types are skipped best-effort instead of failing the whole import.
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=jakemor%2Fkanna&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=jakemor/kanna&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=jakemor/kanna&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=jakemor/kanna&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## License
 
 [MIT](LICENSE)

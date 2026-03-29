@@ -53,7 +53,7 @@ describe("read models", () => {
       external: null,
     })
 
-    const chat = deriveChatSnapshot(state, new Map(), "chat-1")
+    const chat = deriveChatSnapshot(state, new Map(), "chat-1", () => [])
     expect(chat?.runtime.provider).toBe("claude")
     expect(chat?.availableProviders.length).toBeGreaterThan(1)
     expect(chat?.availableProviders.find((provider) => provider.id === "codex")?.models.map((model) => model.id)).toEqual([

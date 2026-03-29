@@ -1,4 +1,5 @@
-import { appendFile, mkdir } from "node:fs/promises"
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import { existsSync, readFileSync as readFileSyncImmediate } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { getDataDir, LOG_PREFIX } from "../shared/branding"
@@ -62,6 +63,13 @@ function touchProject(state: StoreState, projectId: string, timestamp: number) {
   project.updatedAt = Math.max(project.updatedAt, timestamp)
 }
 
+interface LegacyTranscriptStats {
+  hasLegacyData: boolean
+  sources: Array<"snapshot" | "messages_log">
+  chatCount: number
+  entryCount: number
+}
+
 export class EventStore {
   readonly dataDir: string
   readonly state: StoreState = createEmptyState()
@@ -72,6 +80,10 @@ export class EventStore {
   private readonly chatsLogPath: string
   private readonly messagesLogPath: string
   private readonly turnsLogPath: string
+  private readonly transcriptsDir: string
+  private legacyMessagesByChatId = new Map<string, TranscriptEntry[]>()
+  private snapshotHasLegacyMessages = false
+  private cachedTranscript: { chatId: string; entries: TranscriptEntry[] } | null = null
 
   constructor(dataDir = getDataDir(homedir())) {
     this.dataDir = dataDir
@@ -80,17 +92,19 @@ export class EventStore {
     this.chatsLogPath = path.join(this.dataDir, "chats.jsonl")
     this.messagesLogPath = path.join(this.dataDir, "messages.jsonl")
     this.turnsLogPath = path.join(this.dataDir, "turns.jsonl")
+    this.transcriptsDir = path.join(this.dataDir, "transcripts")
   }
 
   async initialize() {
     await mkdir(this.dataDir, { recursive: true })
+    await mkdir(this.transcriptsDir, { recursive: true })
     await this.ensureFile(this.projectsLogPath)
     await this.ensureFile(this.chatsLogPath)
     await this.ensureFile(this.messagesLogPath)
     await this.ensureFile(this.turnsLogPath)
     await this.loadSnapshot()
     await this.replayLogs()
-    if (await this.shouldCompact()) {
+    if (!(await this.hasLegacyTranscriptData()) && await this.shouldCompact()) {
       await this.compact()
     }
   }
@@ -106,6 +120,7 @@ export class EventStore {
     if (this.storageReset) return
     this.storageReset = true
     this.resetState()
+    this.clearLegacyTranscriptState()
     await Promise.all([
       Bun.write(this.snapshotPath, ""),
       Bun.write(this.projectsLogPath, ""),
@@ -142,8 +157,11 @@ export class EventStore {
           )
         }
       }
-      for (const messageSet of parsed.messages) {
-        this.state.messagesByChatId.set(messageSet.chatId, cloneTranscriptEntries(messageSet.entries))
+      if (parsed.messages?.length) {
+        this.snapshotHasLegacyMessages = true
+        for (const messageSet of parsed.messages) {
+          this.legacyMessagesByChatId.set(messageSet.chatId, cloneTranscriptEntries(messageSet.entries))
+        }
       }
     } catch (error) {
       console.warn(`${LOG_PREFIX} Failed to load snapshot, resetting local history:`, error)
@@ -156,7 +174,12 @@ export class EventStore {
     this.state.projectIdsByPath.clear()
     this.state.chatsById.clear()
     this.state.chatIdsByExternalSession.clear()
-    this.state.messagesByChatId.clear()
+    this.cachedTranscript = null
+  }
+
+  private clearLegacyTranscriptState() {
+    this.legacyMessagesByChatId.clear()
+    this.snapshotHasLegacyMessages = false
   }
 
   private async replayLogs() {
@@ -323,17 +346,10 @@ export class EventStore {
         break
       }
       case "message_appended": {
-        const chat = this.state.chatsById.get(event.chatId)
-        if (chat) {
-          if (event.entry.kind === "user_prompt") {
-            chat.lastMessageAt = event.entry.createdAt
-          }
-          chat.updatedAt = Math.max(chat.updatedAt, event.entry.createdAt)
-          touchProject(this.state, chat.projectId, event.entry.createdAt)
-        }
-        const existing = this.state.messagesByChatId.get(event.chatId) ?? []
+        this.applyMessageMetadata(event.chatId, event.entry)
+        const existing = this.legacyMessagesByChatId.get(event.chatId) ?? []
         existing.push({ ...event.entry })
-        this.state.messagesByChatId.set(event.chatId, existing)
+        this.legacyMessagesByChatId.set(event.chatId, existing)
         break
       }
       case "turn_started": {
@@ -378,6 +394,16 @@ export class EventStore {
     }
   }
 
+  private applyMessageMetadata(chatId: string, entry: TranscriptEntry) {
+    const chat = this.state.chatsById.get(chatId)
+    if (!chat) return
+    if (entry.kind === "user_prompt") {
+      chat.lastMessageAt = entry.createdAt
+    }
+    chat.updatedAt = Math.max(chat.updatedAt, entry.createdAt)
+    touchProject(this.state, chat.projectId, entry.createdAt)
+  }
+
   private append<TEvent extends StoreEvent>(filePath: string, event: TEvent) {
     const payload = `${JSON.stringify(event)}\n`
     this.writeChain = this.writeChain.then(async () => {
@@ -387,18 +413,26 @@ export class EventStore {
     return this.writeChain
   }
 
-  private appendMany<TEvent extends StoreEvent>(filePath: string, events: TEvent[]) {
-    if (events.length === 0) {
-      return this.writeChain
+  private transcriptPath(chatId: string) {
+    return path.join(this.transcriptsDir, `${chatId}.jsonl`)
+  }
+
+  private loadTranscriptFromDisk(chatId: string) {
+    const transcriptPath = this.transcriptPath(chatId)
+    if (!existsSync(transcriptPath)) {
+      return []
     }
-    const payload = events.map((event) => `${JSON.stringify(event)}\n`).join("")
-    this.writeChain = this.writeChain.then(async () => {
-      await appendFile(filePath, payload, "utf8")
-      for (const event of events) {
-        this.applyEvent(event)
-      }
-    })
-    return this.writeChain
+
+    const text = readFileSyncImmediate(transcriptPath, "utf8")
+    if (!text.trim()) return []
+
+    const entries: TranscriptEntry[] = []
+    for (const rawLine of text.split("\n")) {
+      const line = rawLine.trim()
+      if (!line) continue
+      entries.push(JSON.parse(line) as TranscriptEntry)
+    }
+    return entries
   }
 
   async openProject(localPath: string, title?: string) {
@@ -596,14 +630,17 @@ export class EventStore {
 
   async appendMessage(chatId: string, entry: TranscriptEntry) {
     this.requireChat(chatId)
-    const event: MessageEvent = {
-      v: STORE_VERSION,
-      type: "message_appended",
-      timestamp: Date.now(),
-      chatId,
-      entry,
-    }
-    await this.append(this.messagesLogPath, event)
+    const payload = `${JSON.stringify(entry)}\n`
+    const transcriptPath = this.transcriptPath(chatId)
+    this.writeChain = this.writeChain.then(async () => {
+      await mkdir(this.transcriptsDir, { recursive: true })
+      await appendFile(transcriptPath, payload, "utf8")
+      this.applyMessageMetadata(chatId, entry)
+      if (this.cachedTranscript?.chatId === chatId) {
+        this.cachedTranscript.entries.push({ ...entry })
+      }
+    })
+    return this.writeChain
   }
 
   async appendImportedMessages(chatId: string, entries: TranscriptEntry[]) {
@@ -612,25 +649,36 @@ export class EventStore {
       return 0
     }
 
-    const existingIds = new Set((this.state.messagesByChatId.get(chatId) ?? []).map((entry) => entry._id))
-    const events: MessageEvent[] = []
+    const existingIds = new Set(this.getMessages(chatId).map((entry) => entry._id))
+    const pendingEntries: TranscriptEntry[] = []
 
     for (const entry of entries) {
       if (existingIds.has(entry._id)) {
         continue
       }
       existingIds.add(entry._id)
-      events.push({
-        v: STORE_VERSION,
-        type: "message_appended",
-        timestamp: Date.now(),
-        chatId,
-        entry,
-      })
+      pendingEntries.push({ ...entry })
     }
 
-    await this.appendMany(this.messagesLogPath, events)
-    return events.length
+    if (pendingEntries.length === 0) {
+      return 0
+    }
+
+    const transcriptPath = this.transcriptPath(chatId)
+    const payload = pendingEntries.map((entry) => JSON.stringify(entry)).join("\n")
+    this.writeChain = this.writeChain.then(async () => {
+      await mkdir(this.transcriptsDir, { recursive: true })
+      await appendFile(transcriptPath, `${payload}\n`, "utf8")
+      for (const entry of pendingEntries) {
+        this.applyMessageMetadata(chatId, entry)
+      }
+      if (this.cachedTranscript?.chatId === chatId) {
+        this.cachedTranscript.entries.push(...pendingEntries.map((entry) => ({ ...entry })))
+      }
+    })
+
+    await this.writeChain
+    return pendingEntries.length
   }
 
   async recordTurnStarted(chatId: string) {
@@ -712,7 +760,19 @@ export class EventStore {
   }
 
   getMessages(chatId: string) {
-    return cloneTranscriptEntries(this.state.messagesByChatId.get(chatId) ?? [])
+    if (this.cachedTranscript?.chatId === chatId) {
+      return cloneTranscriptEntries(this.cachedTranscript.entries)
+    }
+
+    const legacyEntries = this.legacyMessagesByChatId.get(chatId)
+    if (legacyEntries) {
+      this.cachedTranscript = { chatId, entries: cloneTranscriptEntries(legacyEntries) }
+      return cloneTranscriptEntries(this.cachedTranscript.entries)
+    }
+
+    const entries = this.loadTranscriptFromDisk(chatId)
+    this.cachedTranscript = { chatId, entries }
+    return cloneTranscriptEntries(entries)
   }
 
   listProjects() {
@@ -729,7 +789,34 @@ export class EventStore {
     return this.listChatsByProject(projectId).length
   }
 
-  async compact() {
+  async getLegacyTranscriptStats(): Promise<LegacyTranscriptStats> {
+    const messagesLogSize = await Bun.file(this.messagesLogPath).size
+    const sources: LegacyTranscriptStats["sources"] = []
+    if (this.snapshotHasLegacyMessages) {
+      sources.push("snapshot")
+    }
+    if (messagesLogSize > 0) {
+      sources.push("messages_log")
+    }
+
+    let entryCount = 0
+    for (const entries of this.legacyMessagesByChatId.values()) {
+      entryCount += entries.length
+    }
+
+    return {
+      hasLegacyData: sources.length > 0 || this.legacyMessagesByChatId.size > 0,
+      sources,
+      chatCount: this.legacyMessagesByChatId.size,
+      entryCount,
+    }
+  }
+
+  async hasLegacyTranscriptData() {
+    return (await this.getLegacyTranscriptStats()).hasLegacyData
+  }
+
+  private createSnapshot(includeLegacyMessages: boolean): SnapshotFile {
     const snapshot: SnapshotFile = {
       v: STORE_VERSION,
       generatedAt: Date.now(),
@@ -737,12 +824,20 @@ export class EventStore {
       chats: [...this.state.chatsById.values()]
         .filter((chat) => !chat.deletedAt)
         .map((chat) => ({ ...chat })),
-      messages: [...this.state.messagesByChatId.entries()].map(([chatId, entries]) => ({
-        chatId,
-        entries: cloneTranscriptEntries(entries),
-      })),
     }
 
+    if (includeLegacyMessages) {
+      snapshot.messages = [...this.legacyMessagesByChatId.entries()].map(([chatId, entries]) => ({
+        chatId,
+        entries: cloneTranscriptEntries(entries),
+      }))
+    }
+
+    return snapshot
+  }
+
+  async compact() {
+    const snapshot = this.createSnapshot(false)
     await Bun.write(this.snapshotPath, JSON.stringify(snapshot, null, 2))
     await Promise.all([
       Bun.write(this.projectsLogPath, ""),
@@ -750,6 +845,52 @@ export class EventStore {
       Bun.write(this.messagesLogPath, ""),
       Bun.write(this.turnsLogPath, ""),
     ])
+  }
+
+  private async compactLegacyMessagesIntoSnapshot() {
+    const snapshot = this.createSnapshot(true)
+    await Bun.write(this.snapshotPath, JSON.stringify(snapshot, null, 2))
+    await Promise.all([
+      Bun.write(this.projectsLogPath, ""),
+      Bun.write(this.chatsLogPath, ""),
+      Bun.write(this.messagesLogPath, ""),
+      Bun.write(this.turnsLogPath, ""),
+    ])
+  }
+
+  async migrateLegacyTranscripts(onProgress?: (message: string) => void) {
+    const stats = await this.getLegacyTranscriptStats()
+    if (!stats.hasLegacyData) return false
+
+    const sourceSummary = stats.sources.map((source) => source === "messages_log" ? "messages.jsonl" : "snapshot.json").join(", ")
+    onProgress?.(`${LOG_PREFIX} transcript migration detected: ${stats.chatCount} chats, ${stats.entryCount} entries from ${sourceSummary}`)
+    onProgress?.(`${LOG_PREFIX} transcript migration: compacting legacy transcript state into snapshot`)
+    await this.compactLegacyMessagesIntoSnapshot()
+
+    const snapshot = JSON.parse(await readFile(this.snapshotPath, "utf8")) as SnapshotFile
+    const messageSets = snapshot.messages ?? []
+    onProgress?.(`${LOG_PREFIX} transcript migration: writing ${messageSets.length} per-chat transcript files`)
+
+    await mkdir(this.transcriptsDir, { recursive: true })
+    const logEveryChat = messageSets.length <= 10
+    for (let index = 0; index < messageSets.length; index += 1) {
+      const { chatId, entries } = messageSets[index]
+      const transcriptPath = this.transcriptPath(chatId)
+      const tempPath = `${transcriptPath}.tmp`
+      const payload = entries.map((entry) => JSON.stringify(entry)).join("\n")
+      await writeFile(tempPath, payload ? `${payload}\n` : "", "utf8")
+      await rename(tempPath, transcriptPath)
+      if (logEveryChat || (index + 1) % 25 === 0 || index === messageSets.length - 1) {
+        onProgress?.(`${LOG_PREFIX} transcript migration: ${index + 1}/${messageSets.length} chats`)
+      }
+    }
+
+    delete snapshot.messages
+    await Bun.write(this.snapshotPath, JSON.stringify(snapshot, null, 2))
+    this.clearLegacyTranscriptState()
+    this.cachedTranscript = null
+    onProgress?.(`${LOG_PREFIX} transcript migration complete`)
+    return true
   }
 
   private async shouldCompact() {

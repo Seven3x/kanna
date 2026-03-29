@@ -144,7 +144,10 @@ describe("CodexHistoryImporter", () => {
     ])
 
     const messagesLog = readFileSync(path.join(dataDir, "messages.jsonl"), "utf8")
-    expect(messagesLog).toContain("\"type\":\"message_appended\"")
+    expect(messagesLog).toBe("")
+
+    const transcriptFile = readFileSync(path.join(dataDir, "transcripts", `${chat.id}.jsonl`), "utf8")
+    expect(transcriptFile).toContain("\"kind\":\"assistant_text\"")
   })
 
   test("re-importing the same session is idempotent", async () => {
