@@ -51,6 +51,21 @@ describe("normalizeToolCall", () => {
     expect(tool.input.server).toBe("sentry")
     expect(tool.input.tool).toBe("search_issues")
   })
+
+  test("maps legacy spawn_agent tool calls to subagent tasks", () => {
+    const tool = normalizeToolCall({
+      toolName: "spawn_agent",
+      toolId: "tool-4",
+      input: {
+        agent_type: "worker",
+        message: "Inspect the workspace",
+      },
+    })
+
+    expect(tool.toolKind).toBe("subagent_task")
+    if (tool.toolKind !== "subagent_task") throw new Error("unexpected tool kind")
+    expect(tool.input.subagentType).toBe("worker")
+  })
 })
 
 describe("hydrateToolResult", () => {

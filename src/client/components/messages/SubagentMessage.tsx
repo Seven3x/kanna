@@ -85,6 +85,31 @@ function OverviewRow({ label, value }: { label: string; value?: string | null })
   )
 }
 
+function ChildThreadCard({
+  threadId,
+  status,
+  providerStatus,
+  summary,
+}: {
+  threadId?: string
+  status?: HydratedSubagentTaskStatus
+  providerStatus?: string
+  summary?: string
+}) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-background/60 px-3 py-3">
+      <div className="flex flex-wrap items-center gap-2 pb-2">
+        {threadId ? <MetaBadge>{threadId}</MetaBadge> : null}
+        {status ? <MetaBadge status={status}>{statusLabel(status)}</MetaBadge> : null}
+        {providerStatus ? <MetaText>{providerStatus}</MetaText> : null}
+      </div>
+      <div className="text-sm text-foreground/85 break-words">
+        {summary || "No child summary available"}
+      </div>
+    </div>
+  )
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2 min-w-0">
@@ -135,6 +160,7 @@ export function SubagentMessage({ message, isLoading = false, localPath, default
   const [showFullThread, setShowFullThread] = useState(false)
   const hasLongThread = childMessages.length > CHILD_THREAD_PREVIEW_LIMIT
   const visibleChildMessages = showFullThread ? childMessages : childMessages.slice(0, CHILD_THREAD_PREVIEW_LIMIT)
+  const childThreads = result?.childThreads ?? []
   const noChildTranscriptText = result?.childThreadIds?.length
     ? `No child transcript available for ${result.childThreadIds.join(", ")}`
     : "No child transcript available"
@@ -190,6 +216,24 @@ export function SubagentMessage({ message, isLoading = false, localPath, default
                     </MetaCodeBlock>
                   ) : null}
                 </div>
+              </Section>
+
+              <Section title="Child Agents">
+                {childThreads.length > 0 ? (
+                  <div className="grid gap-3">
+                    {childThreads.map((thread, index) => (
+                      <ChildThreadCard
+                        key={`${thread.threadId ?? "child"}:${index}`}
+                        threadId={thread.threadId}
+                        status={thread.status}
+                        providerStatus={thread.providerStatus}
+                        summary={thread.latestMessage ?? thread.summary}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState text="No child agents were exposed for this task." />
+                )}
               </Section>
 
               <Section title="Child Thread">

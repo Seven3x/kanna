@@ -261,6 +261,86 @@ describe("processTranscriptMessages", () => {
     })
   })
 
+  test("rehydrates legacy unknown spawn_agent and wait_agent records as subagent tasks", () => {
+    const messages = processTranscriptMessages([
+      entry({
+        kind: "tool_call",
+        tool: {
+          kind: "tool",
+          toolKind: "unknown_tool",
+          toolName: "spawn_agent",
+          toolId: "agent-legacy-1",
+          input: {
+            payload: {
+              agent_type: "worker",
+              message: "Run a quick check",
+            },
+          },
+          rawInput: {
+            agent_type: "worker",
+            message: "Run a quick check",
+          },
+        },
+      }),
+      entry({
+        kind: "tool_result",
+        toolId: "agent-legacy-1",
+        content: {
+          agent_id: "child-1",
+          nickname: "Euler",
+        },
+      }),
+      entry({
+        kind: "tool_call",
+        tool: {
+          kind: "tool",
+          toolKind: "unknown_tool",
+          toolName: "wait_agent",
+          toolId: "agent-legacy-2",
+          input: {
+            payload: {
+              targets: ["child-1"],
+            },
+          },
+          rawInput: {
+            targets: ["child-1"],
+          },
+        },
+      }),
+      entry({
+        kind: "tool_result",
+        toolId: "agent-legacy-2",
+        content: {
+          status: {
+            "child-1": {
+              completed: "Command: `python -c \"print(1)\"`",
+            },
+          },
+          timed_out: false,
+        },
+      }),
+    ])
+
+    expect(messages[0]?.kind).toBe("tool")
+    if (messages[0]?.kind !== "tool" || messages[0].toolKind !== "subagent_task") {
+      throw new Error("expected legacy spawn_agent to be remapped")
+    }
+    expect(messages[0].input.subagentType).toBe("worker")
+    expect(messages[0].result?.childThreadId).toBe("child-1")
+    expect(messages[0].result?.childTitle).toBe("Euler")
+
+    expect(messages[1]?.kind).toBe("tool")
+    if (messages[1]?.kind !== "tool" || messages[1].toolKind !== "subagent_task") {
+      throw new Error("expected legacy wait_agent to be remapped")
+    }
+    expect(messages[1].result?.childThreadId).toBe("child-1")
+    expect(messages[1].result?.childThreads?.[0]).toMatchObject({
+      threadId: "child-1",
+      providerStatus: "completed",
+      latestMessage: "Command: `python -c \"print(1)\"`",
+    })
+  })
+
   test("marks errored subagent results as error", () => {
     const messages = processTranscriptMessages([
       entry({

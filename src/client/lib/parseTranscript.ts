@@ -1,4 +1,4 @@
-import { hydrateToolResult } from "../../shared/tools"
+import { hydrateToolResult, normalizeToolCall } from "../../shared/tools"
 import type {
   HydratedSubagentTaskResult,
   HydratedSubagentTaskStatus,
@@ -24,19 +24,30 @@ function createBaseMessage(entry: TranscriptEntry) {
 }
 
 function hydrateToolCall(entry: Extract<TranscriptEntry, { kind: "tool_call" }>): HydratedToolCall {
+  const normalizedTool = normalizeTranscriptToolCall(entry.tool)
+
   return {
     id: entry._id,
     messageId: entry.messageId,
     hidden: entry.hidden,
     kind: "tool",
-    toolKind: entry.tool.toolKind,
-    toolName: entry.tool.toolName,
-    toolId: entry.tool.toolId,
-    input: entry.tool.input as HydratedToolCall["input"],
-    rawInput: entry.tool.rawInput,
+    toolKind: normalizedTool.toolKind,
+    toolName: normalizedTool.toolName,
+    toolId: normalizedTool.toolId,
+    input: normalizedTool.input as HydratedToolCall["input"],
+    rawInput: normalizedTool.rawInput,
     debugRaw: entry.debugRaw,
     timestamp: createTimestamp(entry.createdAt),
   } as HydratedToolCall
+}
+
+function normalizeTranscriptToolCall(tool: NormalizedToolCall): NormalizedToolCall {
+  if (tool.toolKind !== "unknown_tool") return tool
+  return normalizeToolCall({
+    toolName: tool.toolName,
+    toolId: tool.toolId,
+    input: tool.rawInput ?? (tool.input as Record<string, unknown>),
+  })
 }
 
 function getStructuredToolResultFromDebug(entry: Extract<TranscriptEntry, { kind: "tool_result" }>): unknown {
@@ -160,19 +171,30 @@ function extractChildTranscriptPreview(record: Record<string, unknown>): Hydrate
 function extractChildThreads(record: Record<string, unknown>): SubagentThreadSummary[] {
   const threadIds = readStringArray(record.receiverThreadIds ?? record.receiver_thread_ids)
   const stateEntries = asRecord(record.agentsStates ?? record.agent_states)
+  const legacyStatusEntries = asRecord(record.status)
   const stateThreadIds = stateEntries ? Object.keys(stateEntries) : []
-  const orderedIds = [...new Set([...threadIds, ...stateThreadIds])]
+  const legacyThreadIds = legacyStatusEntries ? Object.keys(legacyStatusEntries) : []
+  const orderedIds = [...new Set([...threadIds, ...stateThreadIds, ...legacyThreadIds])]
 
   return orderedIds.map((threadId) => {
     const state = asRecord(stateEntries?.[threadId])
+    const legacyState = asRecord(legacyStatusEntries?.[threadId])
     const providerStatus = readString(state?.status)
+      ?? readString(legacyState?.status)
+      ?? (legacyState && typeof legacyState.completed === "string" ? "completed" : undefined)
+      ?? (legacyState && typeof legacyState.running === "string" ? "running" : undefined)
+      ?? (legacyState && typeof legacyState.error === "string" ? "error" : undefined)
+    const legacyMessage = readString(legacyState?.message)
+      ?? readString(legacyState?.completed)
+      ?? readString(legacyState?.running)
+      ?? readString(legacyState?.error)
 
     return {
       threadId,
       status: normalizeSubagentStatus(providerStatus),
       providerStatus,
-      latestMessage: readString(state?.message),
-      summary: readString(state?.message),
+      latestMessage: readString(state?.message) ?? legacyMessage,
+      summary: readString(state?.message) ?? legacyMessage,
     } satisfies SubagentThreadSummary
   })
 }
@@ -185,6 +207,8 @@ function hydrateSubagentResult(rawResult: unknown, rawInput: Record<string, unkn
   const providerStatus = readString(record?.status)
   const childThreadIds = [...new Set([
     ...(record ? readStringArray(record.receiverThreadIds ?? record.receiver_thread_ids) : []),
+    ...(record && typeof record.agent_id === "string" ? [record.agent_id] : []),
+    ...(record && asRecord(record.status) ? Object.keys(asRecord(record.status)!) : []),
     ...(transcriptPreview?.threadId ? [transcriptPreview.threadId] : []),
   ])]
   const latestMessage = lastAssistantText(transcriptPreview?.messages)
@@ -205,7 +229,7 @@ function hydrateSubagentResult(rawResult: unknown, rawInput: Record<string, unkn
     childThreadId: childThreadIds.length === 1 ? childThreadIds[0] : undefined,
     childThreadIds: childThreadIds.length > 0 ? childThreadIds : undefined,
     childSessionId: readString(record?.childSessionId ?? record?.child_session_id),
-    childTitle: transcriptPreview?.title ?? readString(record?.childTitle ?? record?.child_title),
+    childTitle: transcriptPreview?.title ?? readString(record?.childTitle ?? record?.child_title ?? record?.nickname),
     messageCount: transcriptPreview?.messageCount,
     childThreads: childThreads.length > 0 ? childThreads : undefined,
     childTranscript: transcriptPreview,
@@ -253,8 +277,9 @@ export function processTranscriptMessages(entries: TranscriptEntry[]): HydratedT
         })
         break
       case "tool_call": {
+        const normalizedTool = normalizeTranscriptToolCall(entry.tool)
         const toolCall = hydrateToolCall(entry)
-        pendingToolCalls.set(entry.tool.toolId, { hydrated: toolCall, normalized: entry.tool })
+        pendingToolCalls.set(entry.tool.toolId, { hydrated: toolCall, normalized: normalizedTool })
         messages.push(toolCall)
         break
       }

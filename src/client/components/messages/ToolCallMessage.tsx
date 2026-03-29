@@ -1,6 +1,6 @@
 import { Download, Eye, X } from "lucide-react"
 import type { ProcessedToolCall } from "./types"
-import { MetaRow, MetaLabel, MetaCodeBlock, ExpandableRow, VerticalLineContainer, getToolIcon } from "./shared"
+import { MetaRow, MetaLabel, MetaCodeBlock, ExpandableRow, VerticalLineContainer, MetaText, getToolIcon } from "./shared"
 import { useMemo, useState } from "react"
 import { stripWorkspacePath } from "../../lib/pathUtils"
 import { AnimatedShinyText } from "../ui/animated-shiny-text"
@@ -17,6 +17,35 @@ interface Props {
   localPath?: string | null
   projectId?: string | null
   onOpenProjectFile?: (filePath: string) => void
+}
+
+function readFileChangePaths(value: unknown, localPath?: string | null): string[] {
+  if (!value || typeof value !== "object") return []
+  const record = value as Record<string, unknown>
+
+  if (typeof record.filePath === "string") {
+    return [stripWorkspacePath(record.filePath, localPath)]
+  }
+
+  const payload = record.payload
+  if (!payload || typeof payload !== "object") return []
+  const payloadRecord = payload as Record<string, unknown>
+  const changes = Array.isArray(payloadRecord.changes) ? payloadRecord.changes : []
+
+  return changes
+    .map((change) => {
+      if (!change || typeof change !== "object") return null
+      const changeRecord = change as Record<string, unknown>
+      const path = typeof changeRecord.path === "string" ? stripWorkspacePath(changeRecord.path, localPath) : ""
+      const kind = changeRecord.kind
+      const movePath =
+        kind && typeof kind === "object" && typeof (kind as { move_path?: unknown }).move_path === "string"
+          ? stripWorkspacePath((kind as { move_path: string }).move_path, localPath)
+          : ""
+      if (path && movePath) return `${path} -> ${movePath}`
+      return path || null
+    })
+    .filter((entry): entry is string => Boolean(entry))
 }
 
 export function ToolCallMessage({ message, isLoading = false, localPath, projectId, onOpenProjectFile }: Props) {
@@ -72,6 +101,20 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
       return message.input.skill
     }
   }, [message.input, message.toolKind])
+
+  const displayPaths = useMemo(() => {
+    if (message.toolKind === "read_file" || message.toolKind === "write_file" || message.toolKind === "edit_file") {
+      return [stripWorkspacePath(message.input.filePath, localPath)]
+    }
+
+    return readFileChangePaths(message.rawInput ?? message.input, localPath)
+  }, [localPath, message.input, message.rawInput, message.toolKind])
+
+  const displayPathText = useMemo(() => {
+    if (displayPaths.length === 0) return ""
+    if (displayPaths.length === 1) return displayPaths[0]
+    return `${displayPaths[0]} +${displayPaths.length - 1} more`
+  }, [displayPaths])
 
   const isBashTool = message.toolKind === "bash"
   const isWriteTool = message.toolKind === "write_file"
@@ -134,12 +177,18 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
           <VerticalLineContainer className="my-4 text-sm">
             <div className="flex flex-col gap-2">
               {isEditTool ? (
-                <FileContentView
-                  content=""
-                  isDiff
-                  oldString={message.input.oldString}
-                  newString={message.input.newString}
-                />
+                <>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground/80">File</span>
+                    <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
+                  </div>
+                  <FileContentView
+                    content=""
+                    isDiff
+                    oldString={message.input.oldString}
+                    newString={message.input.newString}
+                  />
+                </>
               ) : !isReadTool && !isWriteTool && (
                 <MetaCodeBlock label={
                   isBashTool ? (
@@ -158,14 +207,26 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
                 </MetaCodeBlock>
               )}
               {hasResult && isReadTool && !message.isError && (
-                <FileContentView
-                  content={resultText}
-                />
+                <>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground/80">File</span>
+                    <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
+                  </div>
+                  <FileContentView
+                    content={resultText}
+                  />
+                </>
               )}
               {isWriteTool && !message.isError && (
-                <FileContentView
-                  content={message.input.content}
-                />
+                <>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground/80">File</span>
+                    <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
+                  </div>
+                  <FileContentView
+                    content={message.input.content}
+                  />
+                </>
               )}
               {hasResult && !isReadTool && !(isWriteTool && !message.isError) && !(isEditTool && !message.isError) && (
                 <MetaCodeBlock label={message.isError ? "Error" : "Result"} copyText={resultText}>
@@ -187,14 +248,21 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
             return <Icon className="size-4 text-muted-icon" />
           })()}
         </div>
-        <MetaLabel className="text-left transition-opacity duration-200 truncate">
-          <AnimatedShinyText
-            animate={showLoadingState}
-            shimmerWidth={Math.max(20, ((description || name)?.length ?? 33) * 3)}
-          >
-            {description || name}
-          </AnimatedShinyText>
-        </MetaLabel>
+        <div className="min-w-0">
+          <MetaLabel className="block text-left transition-opacity duration-200 truncate">
+            <AnimatedShinyText
+              animate={showLoadingState}
+              shimmerWidth={Math.max(20, ((description || name)?.length ?? 33) * 3)}
+            >
+              {description || name}
+            </AnimatedShinyText>
+          </MetaLabel>
+          {displayPathText ? (
+            <div className="truncate text-xs text-muted-foreground">
+              {displayPathText}
+            </div>
+          ) : null}
+        </div>
 
 
 

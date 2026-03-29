@@ -59,9 +59,11 @@ interface Props {
   messages: HydratedTranscriptMessage[]
   isLoading: boolean
   localPath?: string | null
+  projectId?: string | null
+  onOpenProjectFile?: (filePath: string) => void
 }
 
-export function CollapsedToolGroup({ messages, isLoading, localPath }: Props) {
+export function CollapsedToolGroup({ messages, isLoading, localPath, projectId, onOpenProjectFile }: Props) {
   const [expanded, setExpanded] = useState(false)
 
   const label = useMemo(() => getToolGroupLabel(messages), [messages])
@@ -100,6 +102,8 @@ export function CollapsedToolGroup({ messages, isLoading, localPath }: Props) {
                 message={msg as ProcessedToolCall}
                 isLoading={isLoading}
                 localPath={localPath}
+                projectId={projectId}
+                onOpenProjectFile={onOpenProjectFile}
               />
             ))}
             {messages.length > 5 && (

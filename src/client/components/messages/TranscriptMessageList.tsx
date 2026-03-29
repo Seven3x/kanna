@@ -190,7 +190,13 @@ export function TranscriptMessageList({
               className="group relative"
               {...selectionProps}
             >
-              <CollapsedToolGroup messages={item.messages} isLoading={isLoading} localPath={localPath} />
+              <CollapsedToolGroup
+                messages={item.messages}
+                isLoading={isLoading}
+                localPath={localPath}
+                projectId={projectId}
+                onOpenProjectFile={onOpenProjectFile}
+              />
             </div>
           )
         }

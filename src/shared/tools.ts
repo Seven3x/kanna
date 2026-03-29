@@ -182,6 +182,24 @@ export function normalizeToolCall(args: {
     }
   }
 
+  if (toolName === "spawn_agent" || toolName === "wait_agent" || toolName === "send_input" || toolName === "resume_agent" || toolName === "close_agent") {
+    return {
+      kind: "tool",
+      toolKind: "subagent_task",
+      toolName,
+      toolId,
+      input: {
+        subagentType:
+          typeof input.agent_type === "string"
+            ? input.agent_type
+            : typeof input.subagent_type === "string"
+              ? input.subagent_type
+              : toolName,
+      },
+      rawInput: input,
+    }
+  }
+
   return {
     kind: "tool",
     toolKind: "unknown_tool",
