@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ExternalLink, Link2 } from "lucide-react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -48,7 +48,9 @@ interface Props {
 
 export function AttachmentPreviewModal({ attachment, onOpenChange }: Props) {
   const [previewCache, setPreviewCache] = useState<Record<string, PreviewState>>({})
-  const previewTarget = attachment ? classifyAttachmentPreview(attachment) : null
+  const previewTarget = useMemo(() => {
+    return attachment ? classifyAttachmentPreview(attachment) : null
+  }, [attachment])
   const previewState = attachment ? previewCache[attachment.id] : undefined
   const absoluteContentUrl = attachment?.contentUrl ? toAbsoluteUrl(attachment.contentUrl) : ""
 
@@ -114,7 +116,13 @@ export function AttachmentPreviewModal({ attachment, onOpenChange }: Props) {
     return () => {
       cancelled = true
     }
-  }, [attachment, previewState?.status, previewTarget])
+  }, [
+    attachment?.id,
+    attachment?.contentUrl,
+    attachment?.mimeType,
+    previewTarget?.kind,
+    previewTarget?.openInNewTab,
+  ])
 
   async function handleCopyLink() {
     if (!absoluteContentUrl || typeof navigator === "undefined" || !navigator.clipboard?.writeText) {

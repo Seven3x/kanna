@@ -107,56 +107,77 @@ export function classifyAttachmentIcon(attachment: ChatAttachment): AttachmentIc
 }
 
 export async function fetchTextPreview(url: string, limitBytes: number): Promise<TextPreviewResult> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Preview request failed with status ${response.status}`)
-  }
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null
+  const timeoutId = typeof window !== "undefined" && controller
+    ? window.setTimeout(() => controller.abort("preview-timeout"), 15000)
+    : null
 
-  if (!response.body) {
-    const text = await response.text()
-    const bytes = new TextEncoder().encode(text)
-    const truncated = bytes.length > limitBytes
-    const content = truncated ? new TextDecoder().decode(bytes.slice(0, limitBytes)) : text
-    return { content, truncated }
-  }
-
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let received = 0
-  let truncated = false
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (!value) continue
-
-    const remaining = limitBytes - received
-    if (remaining <= 0) {
-      truncated = true
-      await reader.cancel()
-      break
+  try {
+    const response = await fetch(resolvePreviewUrl(url), {
+      signal: controller?.signal,
+      headers: {
+        Accept: "text/plain, text/markdown, application/json, text/csv, text/tab-separated-values, */*",
+      },
+    })
+    if (!response.ok) {
+      throw new Error(`Preview request failed with status ${response.status}`)
     }
 
-    if (value.byteLength > remaining) {
-      chunks.push(value.slice(0, remaining))
-      received += remaining
-      truncated = true
-      await reader.cancel()
-      break
+    if (!response.body) {
+      const text = await response.text()
+      const bytes = new TextEncoder().encode(text)
+      const truncated = bytes.length > limitBytes
+      const content = truncated ? new TextDecoder().decode(bytes.slice(0, limitBytes)) : text
+      return { content, truncated }
     }
 
-    chunks.push(value)
-    received += value.byteLength
-  }
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let received = 0
+    let truncated = false
 
-  const bytes = new Uint8Array(received)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
 
-  return { content: new TextDecoder().decode(bytes), truncated }
+      const remaining = limitBytes - received
+      if (remaining <= 0) {
+        truncated = true
+        await reader.cancel()
+        break
+      }
+
+      if (value.byteLength > remaining) {
+        chunks.push(value.slice(0, remaining))
+        received += remaining
+        truncated = true
+        await reader.cancel()
+        break
+      }
+
+      chunks.push(value)
+      received += value.byteLength
+    }
+
+    const bytes = new Uint8Array(received)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+
+    return { content: new TextDecoder().decode(bytes), truncated }
+  } catch (error) {
+    if (isPreviewTimeout(error)) {
+      throw new Error("Preview request timed out")
+    }
+    throw error
+  } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId)
+    }
+  }
 }
 
 export function prettifyJson(content: string): string {
@@ -186,6 +207,22 @@ export function parseDelimitedPreview(content: string, delimiter: "," | "\t"): T
 function getFileExtension(fileName: string) {
   const index = fileName.lastIndexOf(".")
   return index >= 0 ? fileName.slice(index).toLowerCase() : ""
+}
+
+function resolvePreviewUrl(url: string) {
+  if (typeof window === "undefined") {
+    return url
+  }
+
+  return new URL(url, window.location.origin).toString()
+}
+
+function isPreviewTimeout(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return true
+  }
+
+  return typeof error === "string" && error === "preview-timeout"
 }
 
 function parseDelimitedRows(content: string, delimiter: "," | "\t") {

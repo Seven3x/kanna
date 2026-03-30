@@ -13,7 +13,7 @@ import { TerminalManager } from "./terminal-manager"
 import { UpdateManager } from "./update-manager"
 import type { UpdateInstallAttemptResult } from "./cli-runtime"
 import { createWsRouter, type ClientState } from "./ws-router"
-import { deleteProjectUpload, persistProjectUpload } from "./uploads"
+import { deleteProjectUpload, inferAttachmentContentType, persistProjectUpload } from "./uploads"
 import { getProjectUploadDir } from "./paths"
 
 const MAX_UPLOAD_FILES = 10
@@ -281,6 +281,7 @@ async function handleAttachmentContent(req: Request, url: URL, store: EventStore
   }
 
   const filePath = path.join(getProjectUploadDir(project.localPath), storedName)
+  const file = Bun.file(filePath)
   try {
     const info = await stat(filePath)
     if (!info.isFile()) {
@@ -290,7 +291,11 @@ async function handleAttachmentContent(req: Request, url: URL, store: EventStore
     return Response.json({ error: "Attachment not found" }, { status: 404 })
   }
 
-  return new Response(Bun.file(filePath))
+  return new Response(file, {
+    headers: {
+      "Content-Type": inferAttachmentContentType(storedName, file.type),
+    },
+  })
 }
 
 async function handleProjectUploadDelete(req: Request, url: URL, store: EventStore) {

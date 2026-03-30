@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { deleteProjectUpload, persistProjectUpload } from "./uploads"
+import { deleteProjectUpload, inferAttachmentContentType, persistProjectUpload } from "./uploads"
 import { getProjectUploadDir } from "./paths"
 import { persistUploadedFiles, startKannaServer } from "./server"
 
@@ -117,7 +117,33 @@ describe("uploads", () => {
 
       const response = await fetch(`http://localhost:${server.port}${attachment.contentUrl}`)
       expect(response.status).toBe(200)
+      expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8")
       expect(await response.text()).toBe("hello from upload")
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("serves TypeScript uploads as text content", async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-project-typescript-"))
+    tempDirs.push(projectDir)
+
+    const server = await startKannaServer({ port: 4314, strictPort: true })
+
+    try {
+      const project = await server.store.openProject(projectDir, "Project")
+      const attachment = await persistProjectUpload({
+        projectId: project.id,
+        localPath: projectDir,
+        fileName: "main.ts",
+        bytes: new TextEncoder().encode("export const value = 1\n"),
+        fallbackMimeType: "video/mp2t",
+      })
+
+      const response = await fetch(`http://localhost:${server.port}${attachment.contentUrl}`)
+      expect(response.status).toBe(200)
+      expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8")
+      expect(await response.text()).toContain("export const value = 1")
     } finally {
       await server.stop()
     }
@@ -245,5 +271,12 @@ describe("uploads", () => {
     } finally {
       await server.stop()
     }
+  })
+
+  test("infers text-friendly content types for previewable source files", () => {
+    expect(inferAttachmentContentType("notes.txt")).toBe("text/plain; charset=utf-8")
+    expect(inferAttachmentContentType("README.md")).toBe("text/markdown; charset=utf-8")
+    expect(inferAttachmentContentType("main.ts", "video/mp2t")).toBe("text/plain; charset=utf-8")
+    expect(inferAttachmentContentType("archive.zip", "application/zip")).toBe("application/zip")
   })
 })
