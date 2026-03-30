@@ -1,6 +1,7 @@
 import path from "node:path"
 import { stat } from "node:fs/promises"
 import { APP_NAME, getRuntimeProfile } from "../shared/branding"
+import type { ChatAttachment } from "../shared/types"
 import { EventStore } from "./event-store"
 import { AgentCoordinator } from "./agent"
 import { CodexHistoryImporter } from "./codex-history"
@@ -16,6 +17,41 @@ import { deleteProjectUpload, persistProjectUpload } from "./uploads"
 import { getProjectUploadDir } from "./paths"
 
 const MAX_UPLOAD_FILES = 10
+const MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024
+
+export async function persistUploadedFiles(args: {
+  projectId: string
+  localPath: string
+  files: File[]
+  persistUpload?: typeof persistProjectUpload
+}): Promise<ChatAttachment[]> {
+  const persistUpload = args.persistUpload ?? persistProjectUpload
+  const attachments: ChatAttachment[] = []
+
+  try {
+    for (const file of args.files) {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const attachment = await persistUpload({
+        projectId: args.projectId,
+        localPath: args.localPath,
+        fileName: file.name,
+        bytes,
+        fallbackMimeType: file.type || undefined,
+      })
+      attachments.push(attachment)
+    }
+  } catch (error) {
+    await Promise.allSettled(
+      attachments.map((attachment) => deleteProjectUpload({
+        localPath: args.localPath,
+        storedName: path.basename(attachment.absolutePath),
+      }))
+    )
+    throw error
+  }
+
+  return attachments
+}
 
 export interface StartKannaServerOptions {
   port?: number
@@ -119,7 +155,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
             return deleteUploadResponse
           }
 
-          const attachmentContentResponse = await handleAttachmentContent(url, store)
+          const attachmentContentResponse = await handleAttachmentContent(req, url, store)
           if (attachmentContentResponse) {
             return attachmentContentResponse
           }
@@ -197,24 +233,41 @@ async function handleProjectUpload(req: Request, url: URL, store: EventStore) {
     return Response.json({ error: `You can upload up to ${MAX_UPLOAD_FILES} files at a time.` }, { status: 400 })
   }
 
-  const attachments = await Promise.all(files.map(async (file) => {
-    const bytes = new Uint8Array(await file.arrayBuffer())
-    return persistProjectUpload({
+  for (const file of files) {
+    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+      return Response.json(
+        { error: `File "${file.name}" exceeds the ${Math.floor(MAX_UPLOAD_SIZE_BYTES / (1024 * 1024))} MB limit.` },
+        { status: 413 }
+      )
+    }
+  }
+
+  try {
+    const attachments = await persistUploadedFiles({
       projectId: project.id,
       localPath: project.localPath,
-      fileName: file.name,
-      bytes,
-      fallbackMimeType: file.type || undefined,
+      files,
     })
-  }))
-
-  return Response.json({ attachments })
+    return Response.json({ attachments })
+  } catch (error) {
+    console.error("[uploads] Upload failed:", error)
+    return Response.json({ error: "Upload failed" }, { status: 500 })
+  }
 }
 
-async function handleAttachmentContent(url: URL, store: EventStore) {
+async function handleAttachmentContent(req: Request, url: URL, store: EventStore) {
   const match = url.pathname.match(/^\/api\/projects\/([^/]+)\/uploads\/([^/]+)\/content$/)
   if (!match) {
     return null
+  }
+
+  if (req.method !== "GET") {
+    return new Response(null, {
+      status: 405,
+      headers: {
+        Allow: "GET",
+      },
+    })
   }
 
   const project = store.getProject(match[1])

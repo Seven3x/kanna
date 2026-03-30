@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir, open, rm } from "node:fs/promises"
 import path from "node:path"
 import { fileTypeFromBuffer } from "file-type"
 import type { ChatAttachment } from "../shared/types"
@@ -14,20 +14,18 @@ function sanitizeFileName(fileName: string) {
   return cleaned || "upload"
 }
 
-async function allocateUploadPath(uploadDir: string, originalName: string) {
+function getUploadCandidateNames(originalName: string) {
   const sanitizedName = sanitizeFileName(originalName)
   const parsed = path.parse(sanitizedName)
   const extension = parsed.ext
   const name = parsed.name || "upload"
 
-  let candidate = sanitizedName
-  let counter = 1
-  while (await Bun.file(path.join(uploadDir, candidate)).exists()) {
-    candidate = `${name}-${counter}${extension}`
-    counter += 1
+  return {
+    first: sanitizedName,
+    withCounter(counter: number) {
+      return `${name}-${counter}${extension}`
+    },
   }
-
-  return candidate
 }
 
 export async function persistProjectUpload(args: {
@@ -42,9 +40,32 @@ export async function persistProjectUpload(args: {
 
   const detectedType = await fileTypeFromBuffer(args.bytes)
   const mimeType = detectedType?.mime ?? args.fallbackMimeType ?? DEFAULT_BINARY_MIME_TYPE
-  const storedName = await allocateUploadPath(uploadDir, args.fileName)
-  const absolutePath = path.join(uploadDir, storedName)
-  await Bun.write(absolutePath, args.bytes)
+  const candidates = getUploadCandidateNames(args.fileName)
+
+  let storedName = candidates.first
+  let absolutePath = path.join(uploadDir, storedName)
+  let counter = 1
+
+  while (true) {
+    try {
+      const handle = await open(absolutePath, "wx")
+      try {
+        await handle.writeFile(args.bytes)
+      } finally {
+        await handle.close()
+      }
+      break
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? (error as NodeJS.ErrnoException).code : undefined
+      if (code !== "EEXIST") {
+        throw error
+      }
+
+      storedName = candidates.withCounter(counter)
+      absolutePath = path.join(uploadDir, storedName)
+      counter += 1
+    }
+  }
 
   return {
     id: randomUUID(),

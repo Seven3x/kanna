@@ -28,6 +28,16 @@ import { classifyAttachmentPreview } from "../messages/attachmentPreview"
 const MAX_FILES_PER_DROP = 10
 const MAX_CONCURRENT_UPLOADS = 3
 
+export function willExceedAttachmentLimit(args: {
+  currentAttachmentCount: number
+  queuedAttachmentCount: number
+  incomingAttachmentCount: number
+  maxAttachments?: number
+}) {
+  const maxAttachments = args.maxAttachments ?? MAX_FILES_PER_DROP
+  return args.currentAttachmentCount + args.queuedAttachmentCount + args.incomingAttachmentCount > maxAttachments
+}
+
 interface ComposerAttachment extends ChatAttachment {
   status: "uploading" | "uploaded" | "failed"
   previewUrl?: string
@@ -631,7 +641,11 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
       return
     }
 
-    if (files.length > MAX_FILES_PER_DROP) {
+    if (willExceedAttachmentLimit({
+      currentAttachmentCount: attachmentsRef.current.length,
+      queuedAttachmentCount: uploadQueueRef.current.length,
+      incomingAttachmentCount: files.length,
+    })) {
       setUploadError(`You can upload up to ${MAX_FILES_PER_DROP} files at a time.`)
       return
     }

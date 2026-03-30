@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { deleteProjectUpload, persistProjectUpload } from "./uploads"
 import { getProjectUploadDir } from "./paths"
-import { startKannaServer } from "./server"
+import { persistUploadedFiles, startKannaServer } from "./server"
 
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9sAAAAASUVORK5CYII="
@@ -43,6 +43,41 @@ describe("uploads", () => {
     expect(second.contentUrl).toBe("/api/projects/project-1/uploads/notes-1.txt/content")
     expect(await Bun.file(path.join(projectDir, ".kanna/uploads/notes.txt")).text()).toBe("hello")
     expect(await Bun.file(path.join(projectDir, ".kanna/uploads/notes-1.txt")).text()).toBe("world")
+  })
+
+  test("stores concurrent same-name uploads without overwriting existing content", async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-upload-concurrent-"))
+    tempDirs.push(projectDir)
+
+    const attachments = await Promise.all([
+      persistProjectUpload({
+        projectId: "project-1",
+        localPath: projectDir,
+        fileName: "notes.txt",
+        bytes: new TextEncoder().encode("first"),
+        fallbackMimeType: "text/plain",
+      }),
+      persistProjectUpload({
+        projectId: "project-1",
+        localPath: projectDir,
+        fileName: "notes.txt",
+        bytes: new TextEncoder().encode("second"),
+        fallbackMimeType: "text/plain",
+      }),
+      persistProjectUpload({
+        projectId: "project-1",
+        localPath: projectDir,
+        fileName: "notes.txt",
+        bytes: new TextEncoder().encode("third"),
+        fallbackMimeType: "text/plain",
+      }),
+    ])
+
+    const storedNames = attachments.map((attachment) => path.basename(attachment.absolutePath)).sort()
+    expect(storedNames).toEqual(["notes-1.txt", "notes-2.txt", "notes.txt"])
+
+    const contents = await Promise.all(attachments.map((attachment) => Bun.file(attachment.absolutePath).text()))
+    expect(new Set(contents)).toEqual(new Set(["first", "second", "third"]))
   })
 
   test("detects image uploads and returns absolute plus project-relative paths", async () => {
@@ -86,6 +121,83 @@ describe("uploads", () => {
     } finally {
       await server.stop()
     }
+  })
+
+  test("rejects non-GET requests for attachment content", async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-project-content-method-"))
+    tempDirs.push(projectDir)
+
+    const server = await startKannaServer({ port: 4312, strictPort: true })
+
+    try {
+      const project = await server.store.openProject(projectDir, "Project")
+      const attachment = await persistProjectUpload({
+        projectId: project.id,
+        localPath: projectDir,
+        fileName: "hello.txt",
+        bytes: new TextEncoder().encode("hello from upload"),
+        fallbackMimeType: "text/plain",
+      })
+
+      const response = await fetch(`http://localhost:${server.port}${attachment.contentUrl}`, { method: "POST" })
+      expect(response.status).toBe(405)
+      expect(response.headers.get("allow")).toBe("GET")
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("rejects oversized uploads before reading them into memory", async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-project-oversize-"))
+    tempDirs.push(projectDir)
+
+    const server = await startKannaServer({ port: 4313, strictPort: true })
+
+    try {
+      const project = await server.store.openProject(projectDir, "Project")
+      const formData = new FormData()
+      formData.append("files", new File([new Uint8Array(25 * 1024 * 1024 + 1)], "big.bin", { type: "application/octet-stream" }))
+
+      const response = await fetch(`http://localhost:${server.port}/api/projects/${project.id}/uploads`, {
+        method: "POST",
+        body: formData,
+      })
+
+      expect(response.status).toBe(413)
+      expect(await response.json()).toEqual({
+        error: "File \"big.bin\" exceeds the 25 MB limit.",
+      })
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("cleans up already-persisted files when a later file in the batch fails", async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-project-cleanup-"))
+    tempDirs.push(projectDir)
+
+    const files = [
+      new File(["first"], "first.txt", { type: "text/plain" }),
+      new File(["second"], "second.txt", { type: "text/plain" }),
+    ]
+
+    await expect(
+      persistUploadedFiles({
+        projectId: "project-4",
+        localPath: projectDir,
+        files,
+        persistUpload: async (args) => {
+          if (args.fileName === "second.txt") {
+            throw new Error("disk full")
+          }
+
+          return persistProjectUpload(args)
+        },
+      })
+    ).rejects.toThrow("disk full")
+
+    expect(await Bun.file(path.join(projectDir, ".kanna/uploads/first.txt")).exists()).toBe(false)
+    expect(await Bun.file(path.join(projectDir, ".kanna/uploads/second.txt")).exists()).toBe(false)
   })
 
   test("deletes uploaded attachments from the project uploads directory", async () => {

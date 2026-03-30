@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { getStoredLockedComposerState, resolvePlanModeState, ChatInput } from "./ChatInput"
+import { getStoredLockedComposerState, resolvePlanModeState, willExceedAttachmentLimit, ChatInput } from "./ChatInput"
 import { useChatPreferencesStore } from "../../stores/chatPreferencesStore"
 import { useChatInputStore } from "../../stores/chatInputStore"
 import { PROVIDERS } from "../../../shared/types"
@@ -10,7 +10,7 @@ const INITIAL_STATE = useChatPreferencesStore.getInitialState()
 
 afterEach(() => {
   useChatPreferencesStore.setState(INITIAL_STATE)
-  useChatInputStore.setState({ drafts: {} })
+  useChatInputStore.setState({ drafts: {}, attachmentDrafts: {} })
 })
 
 describe("resolvePlanModeState", () => {
@@ -19,7 +19,7 @@ describe("resolvePlanModeState", () => {
       providerLocked: false,
       planMode: true,
       selectedProvider: "claude",
-      composerState: INITIAL_STATE.composerState,
+      composerState: INITIAL_STATE.legacyComposerState!,
       providerDefaults: INITIAL_STATE.providerDefaults,
       lockedComposerState: null,
     })
@@ -121,6 +121,7 @@ describe("resolvePlanModeState", () => {
     })
   })
 })
+
 describe("getStoredLockedComposerState", () => {
   test("returns the cached state for the selected chat when the provider matches", () => {
     const result = getStoredLockedComposerState({
@@ -154,12 +155,31 @@ describe("getStoredLockedComposerState", () => {
   })
 })
 
+describe("willExceedAttachmentLimit", () => {
+  test("rejects a batch that would push the composer above the total attachment limit", () => {
+    expect(willExceedAttachmentLimit({
+      currentAttachmentCount: 7,
+      queuedAttachmentCount: 1,
+      incomingAttachmentCount: 3,
+    })).toBe(true)
+  })
+
+  test("allows a batch that exactly reaches the total attachment limit", () => {
+    expect(willExceedAttachmentLimit({
+      currentAttachmentCount: 7,
+      queuedAttachmentCount: 1,
+      incomingAttachmentCount: 2,
+    })).toBe(false)
+  })
+})
+
 describe("ChatInput", () => {
   test("renders highlighted skill badges with hover descriptions for existing skill mentions", () => {
     useChatInputStore.setState({
       drafts: {
         "chat-1": "Use $openai-docs here",
       },
+      attachmentDrafts: {},
     })
 
     const html = renderToStaticMarkup(
