@@ -79,6 +79,41 @@ function collectCodexSessionFiles(directory: string): string[] {
   return files
 }
 
+function dedupeSessionsByExternalSessionId(sessions: ParsedCodexSession[]) {
+  const bestByExternalSessionId = new Map<string, ParsedCodexSession>()
+
+  for (const session of sessions) {
+    const existing = bestByExternalSessionId.get(session.externalSessionId)
+    if (!existing) {
+      bestByExternalSessionId.set(session.externalSessionId, session)
+      continue
+    }
+
+    const sessionFileMatchesId = path.basename(session.sourceFile).includes(session.externalSessionId)
+    const existingFileMatchesId = path.basename(existing.sourceFile).includes(existing.externalSessionId)
+
+    if (sessionFileMatchesId !== existingFileMatchesId) {
+      if (sessionFileMatchesId) {
+        bestByExternalSessionId.set(session.externalSessionId, session)
+      }
+      continue
+    }
+
+    if (session.sourceUpdatedAt !== existing.sourceUpdatedAt) {
+      if (session.sourceUpdatedAt > existing.sourceUpdatedAt) {
+        bestByExternalSessionId.set(session.externalSessionId, session)
+      }
+      continue
+    }
+
+    if (session.entries.length > existing.entries.length) {
+      bestByExternalSessionId.set(session.externalSessionId, session)
+    }
+  }
+
+  return [...bestByExternalSessionId.values()]
+}
+
 function readCodexSessionIndex(indexPath: string) {
   const entries = new Map<string, CodexSessionIndexRecord>()
   if (!existsSync(indexPath)) {
@@ -118,6 +153,32 @@ function makeImportedEntryId(sessionId: string, lineIndex: number, entryIndex: n
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   return value as Record<string, unknown>
+}
+
+function isCodexSubagentSession(payload: Record<string, unknown>) {
+  const source = asRecord(payload.source)
+  const subagent = asRecord(source?.subagent)
+  return Boolean(asRecord(subagent?.thread_spawn))
+}
+
+function isCodexSubagentNotificationMessage(message: string) {
+  const trimmed = message.trim()
+  return /^<subagent_notification>\s*[\s\S]*<\/subagent_notification>$/.test(trimmed)
+}
+
+function isCodexTitleGenerationPrompt(message: string) {
+  const trimmed = message.trim()
+  return trimmed.startsWith("Generate a short, descriptive title (under 30 chars) for a conversation that starts with this message.")
+}
+
+function isCodexSubagentBootstrapMessage(message: string) {
+  const trimmed = message.trim()
+  return trimmed.startsWith("You are the newly spawned agent. The prior conversation history was forked from your parent agent.")
+}
+
+function isCodexSubagentTaskPrompt(message: string) {
+  const trimmed = message.trim()
+  return trimmed.startsWith("Task: ")
 }
 
 function asMcpServers(value: unknown): McpServerInfo[] {
@@ -300,6 +361,10 @@ function eventMessageEntries(
   const payloadType = payload.type
 
   if (payloadType === "user_message" && typeof payload.message === "string" && payload.message.trim()) {
+    if (isCodexSubagentNotificationMessage(payload.message)) {
+      return []
+    }
+
     return [
       createEntry(sessionId, lineIndex, 0, createdAt, {
         kind: "user_prompt",
@@ -333,6 +398,47 @@ function firstUserPromptSummary(entries: TranscriptEntry[]) {
   return collapsed.length <= 60 ? collapsed : `${collapsed.slice(0, 57)}...`
 }
 
+function hasCodexInternalTitleGenerationPrompt(entries: TranscriptEntry[]) {
+  const userEntry = entries.find((entry) => entry.kind === "user_prompt")
+  return Boolean(userEntry && userEntry.kind === "user_prompt" && isCodexTitleGenerationPrompt(userEntry.content))
+}
+
+function stripLeakedSubagentTranscriptSuffix(entries: TranscriptEntry[]) {
+  let lastInterruptedIndex = -1
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (entries[index]?.kind === "interrupted") {
+      lastInterruptedIndex = index
+      break
+    }
+  }
+
+  if (lastInterruptedIndex === -1) return entries
+
+  const interruptedAt = entries[lastInterruptedIndex]!.createdAt
+  const trailingEntries = entries.slice(lastInterruptedIndex + 1)
+  const leakedOlderEntries = trailingEntries.filter((entry) => entry.createdAt < interruptedAt)
+  if (leakedOlderEntries.length === 0) return entries
+
+  const containsLeakedSubagentSignals = leakedOlderEntries.some((entry) => {
+    if (entry.kind === "user_prompt") {
+      return isCodexSubagentTaskPrompt(entry.content)
+    }
+
+    if (entry.kind === "tool_result" && typeof entry.content === "string") {
+      return isCodexSubagentBootstrapMessage(entry.content)
+    }
+
+    return false
+  })
+
+  if (!containsLeakedSubagentSignals) return entries
+
+  return [
+    ...entries.slice(0, lastInterruptedIndex + 1),
+    ...trailingEntries.filter((entry) => entry.createdAt >= interruptedAt),
+  ]
+}
+
 function parseCodexSessionFile(
   sessionFile: string,
   targetPathKey: string,
@@ -344,6 +450,7 @@ function parseCodexSessionFile(
   const entries: TranscriptEntry[] = []
   let sessionId: string | null = null
   let cwd: string | null = null
+  let isSubagentSession = false
   let sawSystemInit = false
   let latestTimestamp = fileMtime
 
@@ -366,6 +473,7 @@ function parseCodexSessionFile(
 
       sessionId = typeof payload.id === "string" ? payload.id : sessionId
       cwd = typeof payload.cwd === "string" ? payload.cwd : cwd
+      isSubagentSession = isCodexSubagentSession(payload)
       continue
     }
 
@@ -401,6 +509,14 @@ function parseCodexSessionFile(
     return { session: null, warnings }
   }
 
+  if (isSubagentSession) {
+    return { session: null, warnings }
+  }
+
+  if (hasCodexInternalTitleGenerationPrompt(entries)) {
+    return { session: null, warnings }
+  }
+
   const normalizedCwd = normalizeExistingDirectory(cwd)
   if (!normalizedCwd || toComparablePathKey(normalizedCwd) !== targetPathKey) {
     return { session: null, warnings }
@@ -417,7 +533,7 @@ function parseCodexSessionFile(
       title,
       sourceFile: sessionFile,
       sourceUpdatedAt,
-      entries,
+      entries: stripLeakedSubagentTranscriptSuffix(entries),
     } satisfies ParsedCodexSession,
     warnings,
   }
@@ -456,8 +572,9 @@ export class CodexHistoryImporter {
       }
     }
 
-    sessions.sort((left, right) => right.sourceUpdatedAt - left.sourceUpdatedAt)
-    return { sessions, warnings }
+    const dedupedSessions = dedupeSessionsByExternalSessionId(sessions)
+    dedupedSessions.sort((left, right) => right.sourceUpdatedAt - left.sourceUpdatedAt)
+    return { sessions: dedupedSessions, warnings }
   }
 
   async importSessionsForProject(localPath: string, projectId: string, store: EventStore): Promise<CodexHistoryImportResult> {

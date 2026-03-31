@@ -116,6 +116,51 @@ describe("SubagentMessage", () => {
     expect(html).toContain("I found the failing snapshots and prepared a fix.")
   })
 
+  test("renders subagent result text as markdown-style body content", () => {
+    const html = renderToStaticMarkup(
+      <SubagentMessage
+        message={createSubagentMessage({
+          result: {
+            status: "success",
+            providerStatus: "completed",
+            summary: "Prepared the fix.",
+            latestMessage: "Prepared the fix.",
+            resultText: "## Fix\n\n- updated the importer\n- re-ran the tests",
+            childThreadId: "thread-2",
+            childThreadIds: ["thread-2"],
+          },
+        })}
+        defaultExpanded
+      />
+    )
+
+    expect(html).toContain("Result / Error")
+    expect(html).toContain("<h2")
+    expect(html).toContain("updated the importer")
+    expect(html).toContain("re-ran the tests")
+  })
+
+  test("renders escaped newline sequences as real line breaks for plain text results", () => {
+    const html = renderToStaticMarkup(
+      <SubagentMessage
+        message={createSubagentMessage({
+          result: {
+            status: "success",
+            providerStatus: "completed",
+            summary: "line one\\nline two",
+            latestMessage: "line one\\nline two",
+            resultText: "line one\\nline two\\nline three",
+            childThreadId: "thread-2",
+            childThreadIds: ["thread-2"],
+          },
+        })}
+        defaultExpanded
+      />
+    )
+
+    expect(html).toContain("line one\nline two\nline three")
+  })
+
   test("keeps ordinary tool calls on the existing renderer", () => {
     const html = renderToStaticMarkup(
       <ToolCallMessage

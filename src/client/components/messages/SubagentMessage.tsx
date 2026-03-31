@@ -1,12 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react"
+import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { Bot, CheckCircle2, CircleAlert, Clock3, MessageSquareText, UserRound } from "lucide-react"
 import type { HydratedSubagentTaskStatus } from "../../../shared/types"
 import type { ProcessedToolCall } from "./types"
 import { cn } from "../../lib/utils"
 import { AnimatedShinyText } from "../ui/animated-shiny-text"
-import { ExpandableRow, MetaCodeBlock, MetaLabel, MetaRow, MetaText, VerticalLineContainer } from "./shared"
+import { ExpandableRow, MetaCodeBlock, MetaLabel, MetaRow, MetaText, VerticalLineContainer, createMarkdownComponents } from "./shared"
 import { TranscriptMessageList } from "./TranscriptMessageList"
-import { getSubagentSummary, getSubagentTitle, inferSubagentStatus } from "../../lib/subagentTasks"
+import { getSubagentLatestAssistantSummary, getSubagentSummary, getSubagentTitle, inferSubagentStatus } from "../../lib/subagentTasks"
 
 interface Props {
   message: Extract<ProcessedToolCall, { toolKind: "subagent_task" }>
@@ -20,6 +22,34 @@ const CHILD_THREAD_PREVIEW_LIMIT = 8
 function formatJson(value: unknown): string {
   if (typeof value === "string") return value
   return JSON.stringify(value, null, 2)
+}
+
+function normalizeDisplayText(text: string) {
+  if (!text.includes("\n") && /\\[nrt]/.test(text)) {
+    return text
+      .replace(/\\r\\n/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\n")
+      .replace(/\\t/g, "\t")
+  }
+  return text
+}
+
+function looksLikeMarkdown(text: string) {
+  return /(^|\n)(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|```|\|.+\||\[[^\]]+\]\([^)]+\))/.test(text)
+}
+
+function getSubagentPreviewText(message: Props["message"]) {
+  const text = (
+    getSubagentLatestAssistantSummary(message)
+    ?? message.result?.summary
+    ?? message.result?.latestMessage
+    ?? message.result?.resultText
+    ?? message.result?.errorText
+  )?.trim()
+
+  if (!text) return "No summary available yet"
+  return text
 }
 
 function statusLabel(status: HydratedSubagentTaskStatus): string {
@@ -127,6 +157,30 @@ function EmptyState({ text }: { text: string }) {
   )
 }
 
+function ResultBody({ text }: { text: string }) {
+  const normalizedText = normalizeDisplayText(text)
+
+  if (!looksLikeMarkdown(normalizedText)) {
+    return (
+      <div className="rounded-2xl border border-border/70 bg-background/80 px-4 py-3">
+        <div className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground/90">
+          {normalizedText}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-background/80 px-4 py-3">
+      <div className="text-pretty prose prose-sm max-w-none dark:prose-invert [&_.no-code-highlight_pre]:bg-muted/50">
+        <Markdown remarkPlugins={[remarkGfm]} components={createMarkdownComponents()}>
+          {normalizedText}
+        </Markdown>
+      </div>
+    </div>
+  )
+}
+
 function buildSubtitleParts(result: Props["message"]["result"]) {
   const parts: string[] = []
 
@@ -148,13 +202,14 @@ export function SubagentMessage({ message, isLoading = false, localPath, default
   const status = inferSubagentStatus(message, isLoading)
   const title = getSubagentTitle(message)
   const summary = getSubagentSummary(message)
+  const summaryPreview = useMemo(() => normalizeDisplayText(getSubagentPreviewText(message)), [message])
   const subtitleParts = useMemo(() => buildSubtitleParts(result), [result])
   const inputText = useMemo(() => formatJson(message.rawInput ?? message.input), [message.input, message.rawInput])
   const resultText = useMemo(() => {
     if (message.isError) {
-      return result?.errorText ?? formatJson(message.rawResult ?? result ?? "Subagent task failed")
+      return normalizeDisplayText(result?.errorText ?? formatJson(message.rawResult ?? result ?? "Subagent task failed"))
     }
-    return result?.resultText ?? formatJson(message.rawResult ?? result ?? "No result available")
+    return normalizeDisplayText(result?.resultText ?? formatJson(message.rawResult ?? result ?? "No result available"))
   }, [message.isError, message.rawResult, result])
   const childMessages = result?.childTranscript?.messages ?? []
   const [showFullThread, setShowFullThread] = useState(false)
@@ -202,9 +257,10 @@ export function SubagentMessage({ message, isLoading = false, localPath, default
 
               <Section title="Result / Error">
                 <div className="flex flex-col gap-3">
-                  <MetaCodeBlock label={message.isError ? "Error" : "Result"} copyText={resultText}>
-                    {resultText}
-                  </MetaCodeBlock>
+                  <div className="flex flex-col gap-2">
+                    <span className="font-medium text-muted-foreground">{message.isError ? "Error" : "Result"}</span>
+                    <ResultBody text={resultText} />
+                  </div>
                   {message.rawResult && typeof message.rawResult !== "string" ? (
                     <MetaCodeBlock label="Provider Payload" copyText={formatJson(message.rawResult)}>
                       {formatJson(message.rawResult)}
@@ -290,7 +346,16 @@ export function SubagentMessage({ message, isLoading = false, localPath, default
             </div>
             <div className="mt-2 flex min-w-0 items-start gap-2 text-sm text-foreground/80">
               <Bot className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 break-words text-left">{summary}</span>
+              <div className="min-w-0 flex-1 text-left">
+                <div className="line-clamp-4 whitespace-pre-wrap break-words leading-6">
+                  {summaryPreview}
+                </div>
+                {summaryPreview !== summary ? (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {summary}
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
           <div className="mt-0.5 shrink-0 text-muted-foreground">
