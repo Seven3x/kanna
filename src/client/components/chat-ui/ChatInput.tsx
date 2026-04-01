@@ -16,7 +16,7 @@ import { Textarea } from "../ui/textarea"
 import { cn } from "../../lib/utils"
 import { useIsStandalone } from "../../hooks/useIsStandalone"
 import { useChatInputStore } from "../../stores/chatInputStore"
-import { type ComposerState, useChatPreferencesStore } from "../../stores/chatPreferencesStore"
+import { NEW_CHAT_COMPOSER_ID, type ComposerState, useChatPreferencesStore } from "../../stores/chatPreferencesStore"
 import { CHAT_INPUT_ATTRIBUTE, focusNextChatInput } from "../../app/chatFocusPolicy"
 import { ChatPreferenceControls } from "./ChatPreferenceControls"
 
@@ -61,6 +61,24 @@ function createLockedComposerState(
     model: providerDefaults.codex.model,
     modelOptions: { ...providerDefaults.codex.modelOptions },
     planMode: providerDefaults.codex.planMode,
+  }
+}
+
+function withNormalizedContextWindow(state: ComposerState, model: string): ComposerState {
+  if (state.provider !== "claude") {
+    return { ...state, model }
+  }
+
+  const normalizedContextWindow = normalizeClaudeContextWindow(model, state.modelOptions.contextWindow)
+  const { contextWindow: _unusedContextWindow, ...restModelOptions } = state.modelOptions
+
+  return {
+    ...state,
+    model,
+    modelOptions: {
+      ...restModelOptions,
+      ...(normalizedContextWindow ? { contextWindow: normalizedContextWindow } : {}),
+    },
   }
 }
 
@@ -113,13 +131,18 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
 }, forwardedRef) {
   const { getDraft, setDraft, clearDraft } = useChatInputStore()
   const {
-    composerState,
     providerDefaults,
-    setComposerModel,
-    setComposerModelOptions,
-    setComposerPlanMode,
-    resetComposerFromProvider,
+    getComposerState,
+    initializeComposerForChat,
+    setChatComposerModel,
+    setChatComposerModelOptions,
+    setChatComposerPlanMode,
+    setComposerState,
+    resetChatComposerFromProvider,
   } = useChatPreferencesStore()
+  const composerChatId = chatId ?? NEW_CHAT_COMPOSER_ID
+  const storedComposerState = useChatPreferencesStore((state) => state.chatStates[composerChatId])
+  const composerState = storedComposerState ?? getComposerState(composerChatId)
   const [value, setValue] = useState(() => (chatId ? getDraft(chatId) : ""))
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const inputHighlightRef = useRef<HTMLDivElement>(null)
@@ -229,6 +252,10 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
   }, [chatId])
 
   useEffect(() => {
+    initializeComposerForChat(composerChatId)
+  }, [composerChatId, initializeComposerForChat])
+
+  useEffect(() => {
     if (activeProvider === null) {
       return
     }
@@ -255,9 +282,8 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
       effectiveModel: providerPrefs.model,
       selectedProvider,
       providerLocked,
-      lockedComposerProvider: lockedComposerState?.provider ?? null,
     })
-  }, [activeProvider, chatId, composerState.model, composerState.provider, lockedComposerState?.provider, providerLocked, providerPrefs.model, providerPrefs.provider, selectedProvider])
+  }, [activeProvider, chatId, composerState.model, composerState.provider, providerLocked, providerPrefs.model, providerPrefs.provider, selectedProvider])
 
   function updateLockedComposerState(update: (current: ComposerState | null) => ComposerState | null) {
     if (!providerLocked || !chatId) return
@@ -307,11 +333,11 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
     }
 
     if (selectedProvider === "claude") {
-      setComposerModelOptions({ reasoningEffort: reasoningEffort as ClaudeReasoningEffort })
+      setChatComposerModelOptions(composerChatId, { reasoningEffort: reasoningEffort as ClaudeReasoningEffort })
       return
     }
 
-    setComposerModelOptions({ reasoningEffort: reasoningEffort as CodexReasoningEffort })
+    setChatComposerModelOptions(composerChatId, { reasoningEffort: reasoningEffort as CodexReasoningEffort })
   }
 
   function setClaudeContextWindow(contextWindow: ClaudeContextWindow) {
@@ -319,20 +345,21 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
       updateLockedComposerState((current) => {
         const next = current ?? createLockedComposerState(selectedProvider, providerDefaults)
         if (next.provider !== "claude") return next
-        const normalizedContextWindow = normalizeClaudeContextWindow(next.model, contextWindow)
-        const { contextWindow: _unusedContextWindow, ...restModelOptions } = next.modelOptions
-        return {
-          ...next,
-          modelOptions: {
-            ...restModelOptions,
-            ...(normalizedContextWindow ? { contextWindow: normalizedContextWindow } : {}),
+        return withNormalizedContextWindow(
+          {
+            ...next,
+            modelOptions: {
+              ...next.modelOptions,
+              contextWindow,
+            },
           },
-        }
+          next.model
+        )
       })
       return
     }
 
-    setComposerModelOptions({ contextWindow })
+    setChatComposerModelOptions(composerChatId, { contextWindow })
   }
 
   function setEffectivePlanMode(planMode: boolean) {
@@ -349,7 +376,7 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
       updateLockedComposerState(() => nextState.lockedComposerState)
     }
     if (nextState.composerPlanMode !== composerState.planMode) {
-      setComposerPlanMode(nextState.composerPlanMode)
+      setChatComposerPlanMode(composerChatId, nextState.composerPlanMode)
     }
   }
 
@@ -609,64 +636,49 @@ const ChatInputInner = forwardRef<HTMLTextAreaElement, Props>(function ChatInput
       <div className={cn("overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-3 flex flex-row", isStandalone && "p-5 pt-3")}>
         <div className="min-w-3"/>
         <ChatPreferenceControls
-            availableProviders={availableProviders}
-            selectedProvider={selectedProvider}
-            providerLocked={providerLocked}
-            model={providerPrefs.model}
-            modelOptions={providerPrefs.modelOptions}
-            onProviderChange={(provider) => {
-              if (providerLocked) return
-              resetComposerFromProvider(provider)
-            }}
-            onModelChange={(_, model) => {
-              if (providerLocked) {
-                updateLockedComposerState((current) => {
-                  const next = current ?? createLockedComposerState(selectedProvider, providerDefaults)
-                  if (next.provider === "claude") {
-                    const normalizedContextWindow = normalizeClaudeContextWindow(model, next.modelOptions.contextWindow)
-                    const { contextWindow: _unusedContextWindow, ...restModelOptions } = next.modelOptions
-                    return {
-                      ...next,
-                      model,
-                      modelOptions: {
-                        ...restModelOptions,
-                        ...(normalizedContextWindow ? { contextWindow: normalizedContextWindow } : {}),
-                      },
-                    }
-                  }
+          availableProviders={availableProviders}
+          selectedProvider={selectedProvider}
+          providerLocked={providerLocked}
+          model={providerPrefs.model}
+          modelOptions={providerPrefs.modelOptions}
+          onProviderChange={(provider) => {
+            if (providerLocked) return
+            resetChatComposerFromProvider(composerChatId, provider)
+          }}
+          onModelChange={(_, model) => {
+            if (providerLocked) {
+              updateLockedComposerState((current) => {
+                const next = current ?? createLockedComposerState(selectedProvider, providerDefaults)
+                return withNormalizedContextWindow(next, model)
+              })
+              return
+            }
+            setChatComposerModel(composerChatId, model)
+          }}
+          onClaudeReasoningEffortChange={(effort) => setReasoningEffort(effort)}
+          onClaudeContextWindowChange={(contextWindow) => setClaudeContextWindow(contextWindow)}
+          onCodexReasoningEffortChange={(effort) => setReasoningEffort(effort)}
+          onCodexFastModeChange={(fastMode) => {
+            if (providerLocked) {
+              updateLockedComposerState((current) => {
+                const next = current ?? createLockedComposerState(selectedProvider, providerDefaults)
+                if (next.provider === "claude") return next
+                return {
+                  ...next,
+                  modelOptions: { ...next.modelOptions, fastMode },
+                }
+              })
+              return
+            }
 
-                  return { ...next, model }
-                })
-                return
-              }
-
-              setComposerModel(model)
-            }}
-            onClaudeReasoningEffortChange={(effort) => setReasoningEffort(effort)}
-            onClaudeContextWindowChange={(contextWindow) => setClaudeContextWindow(contextWindow)}
-            onCodexReasoningEffortChange={(effort) => setReasoningEffort(effort)}
-            onCodexFastModeChange={(fastMode) => {
-              if (providerLocked) {
-                updateLockedComposerState((current) => {
-                  const next = current ?? createLockedComposerState(selectedProvider, providerDefaults)
-                  if (next.provider === "claude") return next
-                  return {
-                    ...next,
-                    modelOptions: { ...next.modelOptions, fastMode },
-                  }
-                })
-                return
-              }
-
-              setComposerModelOptions({ fastMode })
-            }}
-            planMode={providerPrefs.planMode}
-            onPlanModeChange={setEffectivePlanMode}
-            includePlanMode={showPlanMode}
-            className="max-w-[840px] mx-auto"
-          />
-        <div className="min-w-3"/>
-
+            setChatComposerModelOptions(composerChatId, { fastMode })
+          }}
+          planMode={providerPrefs.planMode}
+          onPlanModeChange={setEffectivePlanMode}
+          includePlanMode={showPlanMode}
+          className="max-w-[840px] mx-auto"
+        />
+        <div className="min-w-3" />
       </div>
 
      

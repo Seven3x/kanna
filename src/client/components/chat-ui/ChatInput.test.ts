@@ -121,7 +121,6 @@ describe("resolvePlanModeState", () => {
     })
   })
 })
-
 describe("getStoredLockedComposerState", () => {
   test("returns the cached state for the selected chat when the provider matches", () => {
     const result = getStoredLockedComposerState({
