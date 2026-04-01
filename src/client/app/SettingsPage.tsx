@@ -36,6 +36,7 @@ import {
 } from "../components/ui/select"
 import { useTheme, type ThemePreference } from "../hooks/useTheme"
 import { KEYBINDING_ACTION_LABELS, formatKeybindingInput, getResolvedKeybindings, parseKeybindingInput } from "../lib/keybindings"
+import { playChatNotificationSound } from "../lib/chatSounds"
 import { cn } from "../lib/utils"
 import {
   DEFAULT_TERMINAL_MIN_COLUMN_WIDTH,
@@ -47,6 +48,7 @@ import {
   useTerminalPreferencesStore,
 } from "../stores/terminalPreferencesStore"
 import { useChatPreferencesStore } from "../stores/chatPreferencesStore"
+import { CHAT_SOUND_OPTIONS, useChatSoundPreferencesStore, type ChatSoundId, type ChatSoundPreference } from "../stores/chatSoundPreferencesStore"
 import type { KannaState } from "./useKannaState"
 
 const sidebarItems = [
@@ -95,6 +97,12 @@ const editorOptions: { value: EditorPreset; label: string }[] = [
   { value: "vscode", label: "VS Code" },
   { value: "windsurf", label: "Windsurf" },
   { value: "custom", label: "Custom" },
+]
+
+const chatSoundPreferenceOptions: { value: ChatSoundPreference; label: string }[] = [
+  { value: "never", label: "Never" },
+  { value: "unfocused", label: "When Unfocused" },
+  { value: "always", label: "Always" },
 ]
 
 const GITHUB_RELEASES_URL = "https://api.github.com/repos/jakemor/kanna/releases"
@@ -147,6 +155,13 @@ export function getGeneralHeaderAction(updateSnapshot: UpdateSnapshot | null) {
     spinning: isChecking,
     variant: "outline" as const,
   }
+}
+
+export function shouldPreviewChatSoundChange(
+  previousValue: string,
+  nextValue: string
+) {
+  return previousValue !== nextValue
 }
 
 export function resetSettingsPageChangelogCache() {
@@ -390,6 +405,10 @@ export function SettingsPage() {
   const setMinColumnWidth = useTerminalPreferencesStore((store) => store.setMinColumnWidth)
   const setEditorPreset = useTerminalPreferencesStore((store) => store.setEditorPreset)
   const setEditorCommandTemplate = useTerminalPreferencesStore((store) => store.setEditorCommandTemplate)
+  const chatSoundPreference = useChatSoundPreferencesStore((store) => store.chatSoundPreference)
+  const chatSoundId = useChatSoundPreferencesStore((store) => store.chatSoundId)
+  const setChatSoundPreference = useChatSoundPreferencesStore((store) => store.setChatSoundPreference)
+  const setChatSoundId = useChatSoundPreferencesStore((store) => store.setChatSoundId)
   const keybindings = state.keybindings
   const defaultProvider = useChatPreferencesStore((store) => store.defaultProvider)
   const providerDefaults = useChatPreferencesStore((store) => store.providerDefaults)
@@ -503,6 +522,24 @@ export function SettingsPage() {
 
   function commitEditorCommand() {
     setEditorCommandTemplate(editorCommandDraft)
+  }
+
+  function handleChatSoundPreferenceChange(nextValue: ChatSoundPreference) {
+    if (!shouldPreviewChatSoundChange(chatSoundPreference, nextValue)) {
+      return
+    }
+
+    setChatSoundPreference(nextValue)
+    void playChatNotificationSound(chatSoundId, 1).catch(() => undefined)
+  }
+
+  function handleChatSoundIdChange(nextValue: ChatSoundId) {
+    if (!shouldPreviewChatSoundChange(chatSoundId, nextValue)) {
+      return
+    }
+
+    setChatSoundId(nextValue)
+    void playChatNotificationSound(nextValue, 1).catch(() => undefined)
   }
 
   async function commitKeybindings() {
@@ -719,6 +756,52 @@ export function SettingsPage() {
                           options={themeOptions}
                           size="sm"
                         />
+                      </SettingsRow>
+
+                      <SettingsRow
+                        title="Chat Sounds"
+                        description="Play a pop when a chat starts waiting on you or the unread chat count increases"
+                      >
+                        <Select
+                          value={chatSoundPreference}
+                          onValueChange={(value) => handleChatSoundPreferenceChange(value as ChatSoundPreference)}
+                        >
+                          <SelectTrigger className="min-w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {chatSoundPreferenceOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </SettingsRow>
+
+                      <SettingsRow
+                        title="Chat Sound"
+                        description="The bundled sound used for chat notification playback and previews"
+                      >
+                        <Select
+                          value={chatSoundId}
+                          onValueChange={(value) => handleChatSoundIdChange(value as ChatSoundId)}
+                        >
+                          <SelectTrigger className="min-w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {CHAT_SOUND_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
                       </SettingsRow>
 
                       <SettingsRow

@@ -4,6 +4,7 @@ import {
   getNewestRemainingChatId,
   getUiUpdateRestartReconnectAction,
   resolveComposeIntent,
+  shouldMarkActiveChatRead,
   shouldAutoFollowTranscript,
 } from "./useKannaState"
 import type { ChatSnapshot, SidebarData } from "../../shared/types"
@@ -106,6 +107,25 @@ describe("shouldAutoFollowTranscript", () => {
 
   test("returns false when the transcript is not near the bottom", () => {
     expect(shouldAutoFollowTranscript(24)).toBe(false)
+  })
+})
+
+describe("shouldMarkActiveChatRead", () => {
+  test("returns true only when the page is visible and focused", () => {
+    expect(shouldMarkActiveChatRead({
+      visibilityState: "visible",
+      hasFocus: () => true,
+    })).toBe(true)
+
+    expect(shouldMarkActiveChatRead({
+      visibilityState: "hidden",
+      hasFocus: () => true,
+    })).toBe(false)
+
+    expect(shouldMarkActiveChatRead({
+      visibilityState: "visible",
+      hasFocus: () => false,
+    })).toBe(false)
   })
 })
 

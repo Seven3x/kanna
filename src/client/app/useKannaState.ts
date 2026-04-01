@@ -20,6 +20,10 @@ export function getNewestRemainingChatId(projectGroups: SidebarData["projectGrou
   return projectGroup.chats.find((chat) => chat.chatId !== activeChatId)?.chatId ?? null
 }
 
+export function shouldMarkActiveChatRead(doc: Pick<Document, "visibilityState" | "hasFocus"> = document) {
+  return doc.visibilityState === "visible" && doc.hasFocus()
+}
+
 function wsUrl() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
   return `${protocol}//${window.location.host}/ws`
@@ -243,6 +247,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingLocalPath, setStartingLocalPath] = useState<string | null>(null)
   const [pendingChatId, setPendingChatId] = useState<string | null>(null)
+  const [focusEpoch, setFocusEpoch] = useState(0)
   const editorLabel = getEditorPresetLabel(useTerminalPreferencesStore((store) => store.editorPreset))
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -319,6 +324,20 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }, [socket])
 
   useEffect(() => {
+    function handleFocusSignal() {
+      setFocusEpoch((value) => value + 1)
+    }
+
+    window.addEventListener("focus", handleFocusSignal)
+    document.addEventListener("visibilitychange", handleFocusSignal)
+
+    return () => {
+      window.removeEventListener("focus", handleFocusSignal)
+      document.removeEventListener("visibilitychange", handleFocusSignal)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!activeChatId) {
       logKannaState("clearing chat snapshot for non-chat route")
       setChatSnapshot(null)
@@ -376,6 +395,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
 
   useEffect(() => {
     if (!activeChatId || !sidebarReady) return
+    if (!shouldMarkActiveChatRead()) return
     const activeSidebarChat = sidebarData.projectGroups
       .flatMap((group) => group.chats)
       .find((chat) => chat.chatId === activeChatId)
@@ -383,7 +403,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     void socket.command({ type: "chat.markRead", chatId: activeChatId }).catch((error) => {
       setCommandError(error instanceof Error ? error.message : String(error))
     })
-  }, [activeChatId, sidebarData.projectGroups, sidebarReady, socket])
+  }, [activeChatId, focusEpoch, sidebarData.projectGroups, sidebarReady, socket])
 
   useEffect(() => {
     initialScrollCompletedRef.current = false

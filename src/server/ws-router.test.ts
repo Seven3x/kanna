@@ -321,7 +321,7 @@ describe("ws-router", () => {
   })
 
   test("broadcasts background title-generation errors to connected clients", () => {
-    let reportBackgroundError: ((message: string) => void) | null = null
+    let reportBackgroundError: ((message: string) => void) | null | undefined
     const router = createWsRouter({
       store: { state: createEmptyState() } as never,
       agent: {
