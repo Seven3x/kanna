@@ -28,6 +28,13 @@ import { classifyAttachmentPreview } from "../messages/attachmentPreview"
 const MAX_FILES_PER_DROP = 10
 const MAX_CONCURRENT_UPLOADS = 3
 
+const CLIPBOARD_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
+  "image/gif": "gif",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+}
+
 export function willExceedAttachmentLimit(args: {
   currentAttachmentCount: number
   queuedAttachmentCount: number
@@ -36,6 +43,51 @@ export function willExceedAttachmentLimit(args: {
 }) {
   const maxAttachments = args.maxAttachments ?? MAX_FILES_PER_DROP
   return args.currentAttachmentCount + args.queuedAttachmentCount + args.incomingAttachmentCount > maxAttachments
+}
+
+type ClipboardFileItem = Pick<DataTransferItem, "kind" | "type" | "getAsFile">
+
+function hasClipboardTextPayload(clipboardData: DataTransfer | null | undefined) {
+  if (!clipboardData) return false
+  return clipboardData.types.includes("text/plain") || clipboardData.types.includes("text/html")
+}
+
+function getClipboardImageExtension(file: File) {
+  return CLIPBOARD_EXTENSION_BY_MIME_TYPE[file.type] ?? "bin"
+}
+
+function isGenericClipboardImageName(file: File) {
+  const normalized = file.name.trim().toLowerCase()
+  if (!normalized) return true
+
+  const expectedExtension = getClipboardImageExtension(file)
+  return normalized === `image.${expectedExtension}` || normalized === "image.png"
+}
+
+function normalizeClipboardImageFile(file: File, index: number, timestamp: number) {
+  if (file.name && !isGenericClipboardImageName(file)) return file
+
+  const extension = getClipboardImageExtension(file)
+  const suffix = index === 0 ? "" : `-${index}`
+  const fileName = `clipboard-${timestamp}${suffix}.${extension}`
+  Object.defineProperty(file, "name", {
+    configurable: true,
+    value: fileName,
+  })
+  return file
+}
+
+export function getClipboardImageFiles(items: Iterable<ClipboardFileItem>, timestamp: number) {
+  const files: File[] = []
+
+  for (const item of items) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue
+    const file = item.getAsFile()
+    if (!file) continue
+    files.push(normalizeClipboardImageFile(file, files.length, timestamp))
+  }
+
+  return files
 }
 
 interface ComposerAttachment extends ChatAttachment {
@@ -753,6 +805,17 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
     }
   }
 
+  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = getClipboardImageFiles(event.clipboardData.items, Date.now())
+    if (files.length === 0) return
+
+    enqueueFiles(files)
+
+    if (!hasClipboardTextPayload(event.clipboardData)) {
+      event.preventDefault()
+    }
+  }
+
   function handleAttachmentPreview(attachment: ComposerAttachment) {
     const target = classifyAttachmentPreview(attachment)
     if (target.openInNewTab) {
@@ -910,6 +973,7 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 if (chatId) setDraft(chatId, event.target.value)
                 autoResize()
               }}
+              onPaste={handlePaste}
               onSelect={updateSelectionFromTextarea}
               onClick={updateSelectionFromTextarea}
               onKeyUp={updateSelectionFromTextarea}
