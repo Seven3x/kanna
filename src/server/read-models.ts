@@ -122,6 +122,7 @@ export function deriveLocalProjectsSnapshot(
 export function deriveChatSnapshot(
   state: StoreState,
   activeStatuses: Map<string, KannaStatus>,
+  drainingChatIds: Set<string>,
   chatId: string,
   getMessages: (chatId: string) => ChatSnapshot["messages"],
   discoveredProjects: Array<{ localPath: string; title?: string; modifiedAt?: number; skills?: ProjectSkillSummary[] }> = []
@@ -138,6 +139,7 @@ export function deriveChatSnapshot(
     localPath: project.localPath,
     title: chat.title,
     status: deriveStatus(chat, activeStatuses.get(chat.id)),
+    isDraining: drainingChatIds.has(chat.id),
     provider: chat.provider,
     planMode: chat.planMode,
     sessionToken: chat.sessionToken,

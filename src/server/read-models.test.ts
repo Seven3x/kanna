@@ -72,7 +72,7 @@ describe("read models", () => {
       external: null,
     })
 
-    const chat = deriveChatSnapshot(state, new Map(), "chat-1", () => [], [
+    const chat = deriveChatSnapshot(state, new Map(), new Set(), "chat-1", () => [], [
       {
         localPath: "/tmp/project",
         title: "Project",
@@ -187,7 +187,7 @@ describe("read models", () => {
     })
 
     const snapshot = deriveLocalProjectsSnapshot(state, [], "Local Machine")
-    const chat = deriveChatSnapshot(state, new Map(), "chat-1", () => [], [])
+    const chat = deriveChatSnapshot(state, new Map(), new Set(), "chat-1", () => [], [])
 
     expect(snapshot.projects[0]?.skills).toEqual([
       {
