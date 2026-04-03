@@ -2,7 +2,8 @@ import { useEffect } from "react"
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom"
 import { AppDialogProvider } from "../components/ui/app-dialog"
 import { TooltipProvider } from "../components/ui/tooltip"
-import { SDK_CLIENT_APP } from "../../shared/branding"
+import { APP_NAME, SDK_CLIENT_APP } from "../../shared/branding"
+import type { SidebarData } from "../../shared/types"
 import { KannaSidebar } from "./KannaSidebar"
 import { ChatPage } from "./ChatPage"
 import { LocalProjectsPage } from "./LocalProjectsPage"
@@ -13,6 +14,14 @@ const VERSION_SEEN_STORAGE_KEY = "kanna:last-seen-version"
 
 export function shouldRedirectToChangelog(pathname: string, currentVersion: string, seenVersion: string | null) {
   return pathname === "/" && Boolean(currentVersion) && seenVersion !== currentVersion
+}
+
+export function getNotificationTitleCount(sidebarData: SidebarData) {
+  return sidebarData.projectGroups.reduce((count, group) => (
+    count + group.chats.reduce((chatCount, chat) => (
+      chatCount + (chat.unread ? 1 : 0) + (chat.status === "waiting_for_user" ? 1 : 0)
+    ), 0)
+  ), 0)
 }
 
 function KannaLayout() {
@@ -30,6 +39,11 @@ function KannaLayout() {
     if (!shouldRedirect) return
     navigate("/settings/changelog", { replace: true })
   }, [currentVersion, location.pathname, navigate])
+
+  useEffect(() => {
+    const notificationCount = getNotificationTitleCount(state.sidebarData)
+    document.title = notificationCount > 0 ? `[${notificationCount}] ${APP_NAME}` : APP_NAME
+  }, [state.sidebarData])
 
   return (
     <div className="flex h-[100dvh] min-h-[100dvh] overflow-hidden">

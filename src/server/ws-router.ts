@@ -326,6 +326,11 @@ export function createWsRouter({
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
           break
         }
+        case "chat.markRead": {
+          await store.setChatReadState(command.chatId, false)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
+          break
+        }
         case "chat.send": {
           const result = await agent.send(command)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result })

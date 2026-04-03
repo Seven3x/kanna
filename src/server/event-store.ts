@@ -44,6 +44,7 @@ function normalizeChatRecord(chat: Partial<ChatRecord> & Pick<ChatRecord, "id" |
     createdAt: chat.createdAt,
     updatedAt: chat.updatedAt,
     deletedAt: chat.deletedAt,
+    unread: Boolean(chat.unread),
     provider: chat.provider ?? null,
     planMode: Boolean(chat.planMode),
     sessionToken: typeof chat.sessionToken === "string" ? chat.sessionToken : null,
@@ -261,6 +262,7 @@ export class EventStore {
           title: event.title,
           createdAt: event.timestamp,
           updatedAt: event.timestamp,
+          unread: false,
           provider: null,
           planMode: false,
           sessionToken: null,
@@ -345,6 +347,13 @@ export class EventStore {
         touchProject(this.state, chat.projectId, event.timestamp)
         break
       }
+      case "chat_read_state_set": {
+        const chat = this.state.chatsById.get(event.chatId)
+        if (!chat) break
+        chat.unread = event.unread
+        chat.updatedAt = event.timestamp
+        break
+      }
       case "message_appended": {
         this.applyMessageMetadata(event.chatId, event.entry)
         const existing = this.legacyMessagesByChatId.get(event.chatId) ?? []
@@ -363,6 +372,7 @@ export class EventStore {
         const chat = this.state.chatsById.get(event.chatId)
         if (!chat) break
         chat.updatedAt = event.timestamp
+        chat.unread = true
         chat.lastTurnOutcome = "success"
         touchProject(this.state, chat.projectId, event.timestamp)
         break
@@ -371,6 +381,7 @@ export class EventStore {
         const chat = this.state.chatsById.get(event.chatId)
         if (!chat) break
         chat.updatedAt = event.timestamp
+        chat.unread = true
         chat.lastTurnOutcome = "failed"
         touchProject(this.state, chat.projectId, event.timestamp)
         break
@@ -379,6 +390,7 @@ export class EventStore {
         const chat = this.state.chatsById.get(event.chatId)
         if (!chat) break
         chat.updatedAt = event.timestamp
+        chat.unread = true
         chat.lastTurnOutcome = "cancelled"
         touchProject(this.state, chat.projectId, event.timestamp)
         break
@@ -624,6 +636,19 @@ export class EventStore {
       timestamp: Date.now(),
       chatId,
       planMode,
+    }
+    await this.append(this.chatsLogPath, event)
+  }
+
+  async setChatReadState(chatId: string, unread: boolean) {
+    const chat = this.requireChat(chatId)
+    if (chat.unread === unread) return
+    const event: ChatEvent = {
+      v: STORE_VERSION,
+      type: "chat_read_state_set",
+      timestamp: Date.now(),
+      chatId,
+      unread,
     }
     await this.append(this.chatsLogPath, event)
   }

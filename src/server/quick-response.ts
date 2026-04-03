@@ -61,7 +61,31 @@ function parseJsonText(value: string): unknown | null {
   return null
 }
 
-async function runClaudeStructured(args: Omit<StructuredQuickResponseArgs<unknown>, "parse">): Promise<unknown | null> {
+function structuredOutputFromSdkMessage(message: unknown): unknown | null {
+  if (!message || typeof message !== "object") return null
+
+  const record = message as Record<string, unknown>
+  if (record.type === "result") {
+    return record.structured_output ?? null
+  }
+
+  const assistantMessage = record.message
+  if (!assistantMessage || typeof assistantMessage !== "object") return null
+  const content = (assistantMessage as { content?: unknown }).content
+  if (!Array.isArray(content)) return null
+
+  for (const item of content) {
+    if (!item || typeof item !== "object") continue
+    const toolUse = item as Record<string, unknown>
+    if (toolUse.type === "tool_use" && toolUse.name === "StructuredOutput") {
+      return toolUse.input ?? null
+    }
+  }
+
+  return null
+}
+
+export async function runClaudeStructured(args: Omit<StructuredQuickResponseArgs<unknown>, "parse">): Promise<unknown | null> {
   const q = query({
     prompt: args.prompt,
     options: {
@@ -83,8 +107,9 @@ async function runClaudeStructured(args: Omit<StructuredQuickResponseArgs<unknow
     const result = await Promise.race<unknown | null>([
       (async () => {
         for await (const message of q) {
-          if ("result" in message) {
-            return (message as Record<string, unknown>).structured_output ?? null
+          const structuredOutput = structuredOutputFromSdkMessage(message)
+          if (structuredOutput !== null) {
+            return structuredOutput
           }
         }
         return null
@@ -108,12 +133,13 @@ async function runClaudeStructured(args: Omit<StructuredQuickResponseArgs<unknow
   }
 }
 
-async function runCodexStructured(
+export async function runCodexStructured(
   codexManager: CodexAppServerManager,
   args: Omit<StructuredQuickResponseArgs<unknown>, "parse">
 ): Promise<unknown | null> {
   const response = await codexManager.generateStructured({
     cwd: args.cwd,
+    model: "gpt-5.4-mini",
     prompt: `${args.prompt}\n\nReturn JSON only that matches this schema:\n${JSON.stringify(args.schema, null, 2)}`,
   })
   if (typeof response !== "string") return null

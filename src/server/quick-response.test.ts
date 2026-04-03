@@ -127,6 +127,41 @@ describe("QuickResponseAdapter", () => {
       }
     }
   })
+
+  test("uses gpt-5.4-mini for Codex title generation fallback", async () => {
+    const requests: Array<{ cwd: string; prompt: string; model?: string }> = []
+    const adapter = new QuickResponseAdapter({
+      codexManager: {
+        async generateStructured(args: { cwd: string; prompt: string; model?: string }) {
+          requests.push(args)
+          return "{\"title\":\"Codex title\"}"
+        },
+      } as never,
+      runClaudeStructured: async () => null,
+    })
+
+    const result = await adapter.generateStructured({
+      cwd: "/tmp/project",
+      task: "title generation",
+      prompt: "Generate a title",
+      schema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+        },
+        required: ["title"],
+        additionalProperties: false,
+      },
+      parse: (value) => {
+        const output = value && typeof value === "object" ? value as { title?: unknown } : {}
+        return typeof output.title === "string" ? output.title : null
+      },
+    })
+
+    expect(result).toBe("Codex title")
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.model).toBe("gpt-5.4-mini")
+  })
 })
 
 describe("generateTitleForChat", () => {

@@ -350,6 +350,17 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }, [chatSnapshot, pendingChatId])
 
   useEffect(() => {
+    if (!activeChatId || !sidebarReady) return
+    const activeSidebarChat = sidebarData.projectGroups
+      .flatMap((group) => group.chats)
+      .find((chat) => chat.chatId === activeChatId)
+    if (!activeSidebarChat?.unread) return
+    void socket.command({ type: "chat.markRead", chatId: activeChatId }).catch((error) => {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    })
+  }, [activeChatId, sidebarData.projectGroups, sidebarReady, socket])
+
+  useEffect(() => {
     initialScrollCompletedRef.current = false
     if (initialScrollFrameRef.current !== null) {
       window.cancelAnimationFrame(initialScrollFrameRef.current)

@@ -63,6 +63,7 @@ export type ClientCommand =
   | { type: "chat.create"; projectId: string }
   | { type: "chat.rename"; chatId: string; title: string }
   | { type: "chat.delete"; chatId: string }
+  | { type: "chat.markRead"; chatId: string }
   | {
       type: "chat.send"
       chatId?: string
