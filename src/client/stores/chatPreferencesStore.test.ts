@@ -230,4 +230,19 @@ describe("chat preference store", () => {
       planMode: true,
     })
   })
+
+  test("removeChatState deletes persisted composer state for a chat", () => {
+    const store = useChatPreferencesStore.getState()
+
+    store.setComposerState("chat-a", {
+      provider: "codex",
+      model: "gpt-5.3-codex",
+      modelOptions: { reasoningEffort: "low", fastMode: false },
+      planMode: true,
+    })
+    store.removeChatState("chat-a")
+
+    expect(useChatPreferencesStore.getState().chatStates.chatA).toBeUndefined()
+    expect(useChatPreferencesStore.getState().chatStates["chat-a"]).toBeUndefined()
+  })
 })

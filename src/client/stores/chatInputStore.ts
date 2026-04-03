@@ -11,6 +11,7 @@ interface ChatInputState {
   setAttachmentDrafts: (chatId: string, attachments: ChatAttachment[]) => void
   clearAttachmentDrafts: (chatId: string) => void
   getAttachmentDrafts: (chatId: string) => ChatAttachment[]
+  clearChatDraftState: (chatId: string) => void
 }
 
 export const useChatInputStore = create<ChatInputState>()(
@@ -57,6 +58,13 @@ export const useChatInputStore = create<ChatInputState>()(
         }),
 
       getAttachmentDrafts: (chatId) => get().attachmentDrafts[chatId] ?? [],
+
+      clearChatDraftState: (chatId) =>
+        set((state) => {
+          const { [chatId]: _draft, ...drafts } = state.drafts
+          const { [chatId]: _attachmentDraft, ...attachmentDrafts } = state.attachmentDrafts
+          return { drafts, attachmentDrafts }
+        }),
     }),
     {
       name: "chat-input-drafts",

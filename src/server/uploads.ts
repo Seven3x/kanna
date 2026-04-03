@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, open, rm } from "node:fs/promises"
+import { mkdir, open, rm, stat } from "node:fs/promises"
 import path from "node:path"
 import { fileTypeFromBuffer } from "file-type"
 import type { ChatAttachment } from "../shared/types"
@@ -8,6 +8,7 @@ import { getProjectUploadDir } from "./paths"
 const DEFAULT_BINARY_MIME_TYPE = "application/octet-stream"
 const IMAGE_MIME_PREFIX = "image/"
 const TEXT_PLAIN_CONTENT_TYPE = "text/plain; charset=utf-8"
+const ATTACHMENT_CONTENT_URL_PATTERN = /^\/api\/projects\/([^/]+)\/uploads\/([^/]+)\/content$/
 
 const TEXT_CONTENT_TYPE_BY_EXTENSION = new Map<string, string>([
   [".csv", "text/csv; charset=utf-8"],
@@ -27,6 +28,24 @@ function sanitizeFileName(fileName: string) {
   const baseName = path.basename(fileName).trim()
   const cleaned = baseName.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "")
   return cleaned || "upload"
+}
+
+function isSafeStoredUploadName(storedName: string) {
+  return Boolean(storedName)
+    && !storedName.includes("/")
+    && !storedName.includes("\\")
+    && storedName !== "."
+    && storedName !== ".."
+}
+
+export function getStoredUploadNameFromContentUrl(contentUrl: string, projectId: string): string | null {
+  const match = contentUrl.match(ATTACHMENT_CONTENT_URL_PATTERN)
+  if (!match || match[1] !== projectId) {
+    return null
+  }
+
+  const storedName = decodeURIComponent(match[2] ?? "")
+  return isSafeStoredUploadName(storedName) ? storedName : null
 }
 
 function getUploadCandidateNames(originalName: string) {
@@ -108,12 +127,60 @@ export function inferAttachmentContentType(fileName: string, fallbackType?: stri
   return fallbackType || DEFAULT_BINARY_MIME_TYPE
 }
 
+async function inferStoredAttachmentMimeType(filePath: string, storedName: string, fallbackMimeType?: string) {
+  try {
+    const bytes = new Uint8Array(await Bun.file(filePath).slice(0, 4100).arrayBuffer())
+    const detectedType = await fileTypeFromBuffer(bytes)
+    if (detectedType?.mime) {
+      return detectedType.mime
+    }
+  } catch {
+    // Fall back to the recorded or extension-based content type.
+  }
+
+  return inferAttachmentContentType(storedName, fallbackMimeType)
+}
+
+export async function resolveUploadedAttachments(args: {
+  projectId: string
+  localPath: string
+  attachments: ChatAttachment[]
+}): Promise<ChatAttachment[]> {
+  const uploadDir = getProjectUploadDir(args.localPath)
+
+  return Promise.all(args.attachments.map(async (attachment) => {
+    const storedName = getStoredUploadNameFromContentUrl(attachment.contentUrl, args.projectId)
+    if (!storedName) {
+      throw new Error(`Invalid attachment reference: ${attachment.displayName || attachment.id}`)
+    }
+
+    const absolutePath = path.join(uploadDir, storedName)
+    const info = await stat(absolutePath).catch(() => null)
+    if (!info?.isFile()) {
+      throw new Error(`Attachment not found: ${attachment.displayName || storedName}`)
+    }
+
+    const mimeType = await inferStoredAttachmentMimeType(absolutePath, storedName, attachment.mimeType)
+
+    return {
+      id: attachment.id,
+      kind: mimeType.startsWith(IMAGE_MIME_PREFIX) ? "image" : "file",
+      displayName: attachment.displayName.trim() || storedName,
+      absolutePath,
+      relativePath: `./.kanna/uploads/${storedName}`,
+      contentUrl: `/api/projects/${args.projectId}/uploads/${encodeURIComponent(storedName)}/content`,
+      mimeType,
+      size: info.size,
+    }
+  }))
+}
+
 export async function deleteProjectUpload(args: {
   localPath: string
   storedName: string
 }): Promise<boolean> {
   const storedName = args.storedName
-  if (!storedName || storedName.includes("/") || storedName.includes("\\") || storedName === "." || storedName === "..") {
+  if (!isSafeStoredUploadName(storedName)) {
     return false
   }
 

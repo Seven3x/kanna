@@ -703,6 +703,8 @@ export function useKannaState(activeChatId: string | null): KannaState {
     if (!confirmed) return
     try {
       await socket.command({ type: "chat.delete", chatId: chat.chatId })
+      useChatPreferencesStore.getState().removeChatState(chat.chatId)
+      useChatInputStore.getState().clearChatDraftState(chat.chatId)
       if (chat.chatId === activeChatId) {
         const nextChatId = getNewestRemainingChatId(sidebarData.projectGroups, chat.chatId)
         navigate(nextChatId ? `/chat/${nextChatId}` : "/")
@@ -725,9 +727,16 @@ export function useKannaState(activeChatId: string | null): KannaState {
     if (!confirmed) return
 
     try {
+      const projectChatIds = project.chats.map((chat) => chat.chatId)
       await socket.command({ type: "project.remove", projectId })
       useTerminalLayoutStore.getState().clearProject(projectId)
       useRightSidebarStore.getState().clearProject(projectId)
+      const chatPreferences = useChatPreferencesStore.getState()
+      const chatInput = useChatInputStore.getState()
+      for (const chatId of projectChatIds) {
+        chatPreferences.removeChatState(chatId)
+        chatInput.clearChatDraftState(chatId)
+      }
       if (runtime?.projectId === projectId) {
         navigate("/")
       }

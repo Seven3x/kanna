@@ -18,6 +18,19 @@ import { getProjectUploadDir } from "./paths"
 
 const MAX_UPLOAD_FILES = 10
 const MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024
+const MAX_UPLOAD_REQUEST_SIZE_BYTES = MAX_UPLOAD_FILES * MAX_UPLOAD_SIZE_BYTES + 1024 * 1024
+
+function getRequestContentLength(req: Request) {
+  const rawValue = req.headers.get("content-length")
+  if (!rawValue) return null
+
+  const contentLength = Number(rawValue)
+  if (!Number.isFinite(contentLength) || contentLength < 0) {
+    return null
+  }
+
+  return contentLength
+}
 
 export async function persistUploadedFiles(args: {
   projectId: string
@@ -218,6 +231,14 @@ async function handleProjectUpload(req: Request, url: URL, store: EventStore) {
   const project = store.getProject(match[1])
   if (!project) {
     return Response.json({ error: "Project not found" }, { status: 404 })
+  }
+
+  const contentLength = getRequestContentLength(req)
+  if (contentLength !== null && contentLength > MAX_UPLOAD_REQUEST_SIZE_BYTES) {
+    return Response.json(
+      { error: `Upload request exceeds the ${Math.floor(MAX_UPLOAD_SIZE_BYTES / (1024 * 1024))} MB per-file limit.` },
+      { status: 413 }
+    )
   }
 
   const formData = await req.formData()

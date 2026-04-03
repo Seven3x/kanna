@@ -40,4 +40,23 @@ describe("chatInputStore", () => {
     useChatInputStore.getState().clearAttachmentDrafts("chat-1")
     expect(useChatInputStore.getState().getAttachmentDrafts("chat-1")).toEqual([])
   })
+
+  test("clearChatDraftState removes both text and attachment drafts", () => {
+    useChatInputStore.getState().setDraft("chat-1", "draft")
+    useChatInputStore.getState().setAttachmentDrafts("chat-1", [{
+      id: "attachment-1",
+      kind: "file",
+      displayName: "spec.pdf",
+      absolutePath: "/tmp/project/.kanna/uploads/spec.pdf",
+      relativePath: "./.kanna/uploads/spec.pdf",
+      contentUrl: "/api/projects/project-1/uploads/spec.pdf/content",
+      mimeType: "application/pdf",
+      size: 1234,
+    }])
+
+    useChatInputStore.getState().clearChatDraftState("chat-1")
+
+    expect(useChatInputStore.getState().getDraft("chat-1")).toBe("")
+    expect(useChatInputStore.getState().getAttachmentDrafts("chat-1")).toEqual([])
+  })
 })

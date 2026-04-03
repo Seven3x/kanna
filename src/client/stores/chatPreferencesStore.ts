@@ -373,6 +373,7 @@ interface ChatPreferencesState {
   getComposerState: (chatId: string) => ComposerState
   initializeComposerForChat: (chatId: string, options?: { sourceState?: ComposerState | null }) => void
   setComposerState: (chatId: string, composerState: ComposerState) => void
+  removeChatState: (chatId: string) => void
   setChatComposerProvider: (chatId: string, provider: AgentProvider) => void
   setChatComposerModel: (chatId: string, model: string) => void
   setChatComposerModelOptions: (
@@ -494,6 +495,15 @@ export const useChatPreferencesStore = create<ChatPreferencesState>()(
             [chatId]: cloneComposerState(composerState),
           },
         })),
+      removeChatState: (chatId) =>
+        set((state) => {
+          if (!(chatId in state.chatStates)) {
+            return state
+          }
+
+          const { [chatId]: _removedChatState, ...rest } = state.chatStates
+          return { chatStates: rest }
+        }),
       setChatComposerProvider: (chatId, provider) =>
         set((state) => withChatComposerState(state, chatId, () => composerFromProviderDefaults(provider, state.providerDefaults))),
       setChatComposerModel: (chatId, model) =>

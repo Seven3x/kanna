@@ -12,6 +12,7 @@ import type { ClientCommand } from "../shared/protocol"
 import { EventStore } from "./event-store"
 import { CodexAppServerManager } from "./codex-app-server"
 import { type GenerateChatTitleResult, generateTitleForChatDetailed } from "./generate-title"
+import { resolveUploadedAttachments } from "./uploads"
 import type { HarnessEvent, HarnessToolRequest, HarnessTurn } from "./harness-types"
 import {
   codexServiceTierFromModelOptions,
@@ -124,6 +125,31 @@ export function buildPromptText(content: string, attachments: ChatAttachment[]) 
     trimmed || "Please inspect the attached files.",
     attachmentHint,
   ].join("\n\n").trim()
+}
+
+export function buildTitleSeedText(content: string, attachments: Array<Pick<ChatAttachment, "displayName">>) {
+  const normalizedContent = content.replace(/\s+/g, " ").trim()
+  if (normalizedContent) {
+    return normalizedContent
+  }
+
+  const displayNames = attachments
+    .map((attachment) => attachment.displayName.trim())
+    .filter(Boolean)
+
+  if (displayNames.length === 0) {
+    return ""
+  }
+
+  if (displayNames.length === 1) {
+    return `Review ${displayNames[0]}`
+  }
+
+  if (displayNames.length === 2) {
+    return `Review ${displayNames[0]} and ${displayNames[1]}`
+  }
+
+  return `Review ${displayNames[0]}, ${displayNames[1]}, and ${displayNames.length - 2} more files`
 }
 
 function discardedToolResult(
@@ -468,9 +494,21 @@ export class AgentCoordinator {
     }
     await this.store.setPlanMode(args.chatId, args.planMode)
 
+    const project = this.store.getProject(chat.projectId)
+    if (!project) {
+      throw new Error("Project not found")
+    }
+
+    const attachments = await resolveUploadedAttachments({
+      projectId: project.id,
+      localPath: project.localPath,
+      attachments: args.attachments,
+    })
+    const titleSeedText = buildTitleSeedText(args.content, attachments)
+
     const existingMessages = this.store.getMessages(args.chatId)
     const shouldGenerateTitle = args.appendUserPrompt && chat.title === "New Chat" && existingMessages.length === 0
-    const optimisticTitle = shouldGenerateTitle ? fallbackTitleFromMessage(args.content) : null
+    const optimisticTitle = shouldGenerateTitle ? fallbackTitleFromMessage(titleSeedText) : null
 
     if (optimisticTitle) {
       await this.store.renameChat(args.chatId, optimisticTitle)
@@ -479,18 +517,13 @@ export class AgentCoordinator {
     if (args.appendUserPrompt) {
       await this.store.appendMessage(
         args.chatId,
-        timestamped({ kind: "user_prompt", content: args.content, attachments: args.attachments }, Date.now())
+        timestamped({ kind: "user_prompt", content: args.content, attachments }, Date.now())
       )
     }
     await this.store.recordTurnStarted(args.chatId)
 
-    const project = this.store.getProject(chat.projectId)
-    if (!project) {
-      throw new Error("Project not found")
-    }
-
     if (shouldGenerateTitle) {
-      void this.generateTitleInBackground(args.chatId, args.content, project.localPath, optimisticTitle ?? "New Chat")
+      void this.generateTitleInBackground(args.chatId, titleSeedText, project.localPath, optimisticTitle ?? "New Chat")
     }
 
     const onToolRequest = async (request: HarnessToolRequest): Promise<unknown> => {
@@ -514,7 +547,7 @@ export class AgentCoordinator {
     let turn: HarnessTurn
     if (args.provider === "claude") {
       turn = await startClaudeTurn({
-        content: buildPromptText(args.content, args.attachments),
+        content: buildPromptText(args.content, attachments),
         localPath: project.localPath,
         model: args.model,
         effort: args.effort,
@@ -532,7 +565,7 @@ export class AgentCoordinator {
       })
       turn = await this.codexManager.startTurn({
         chatId: args.chatId,
-        content: buildPromptText(args.content, args.attachments),
+        content: buildPromptText(args.content, attachments),
         model: args.model,
         effort: args.effort as any,
         serviceTier: args.serviceTier,

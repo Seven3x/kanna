@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { AgentCoordinator, buildAttachmentHintText, buildPromptText, normalizeClaudeStreamMessage } from "./agent"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { AgentCoordinator, buildAttachmentHintText, buildPromptText, buildTitleSeedText, normalizeClaudeStreamMessage } from "./agent"
 import type { HarnessTurn } from "./harness-types"
 import type { ChatAttachment, TranscriptEntry } from "../shared/types"
+import { persistProjectUpload } from "./uploads"
 
 function timestamped<T extends Omit<TranscriptEntry, "_id" | "createdAt">>(entry: T): TranscriptEntry {
   return {
@@ -107,6 +111,18 @@ describe("attachment prompt helpers", () => {
     }]
 
     expect(buildPromptText("", attachments)).toContain("Please inspect the attached files.")
+  })
+
+  test("derives a title seed from attachments when the prompt is otherwise empty", () => {
+    expect(buildTitleSeedText("", [
+      { displayName: "todo.txt" },
+    ])).toBe("Review todo.txt")
+
+    expect(buildTitleSeedText("", [
+      { displayName: "todo.txt" },
+      { displayName: "spec.pdf" },
+      { displayName: "design.png" },
+    ])).toBe("Review todo.txt, spec.pdf, and 1 more files")
   })
 
   test("escapes xml attribute values for attachment hint markup", () => {
@@ -337,6 +353,81 @@ describe("AgentCoordinator codex integration", () => {
     expect(backgroundErrors).toEqual([
       "[title-generation] chat chat-1 failed provider title generation: claude failed conversation title generation: Not authenticated",
     ])
+  })
+
+  test("sets an optimistic title for attachment-only first turns", async () => {
+    const fakeCodexManager = {
+      async startSession() {},
+      async startTurn(): Promise<HarnessTurn> {
+        async function* stream() {
+          yield {
+            type: "transcript" as const,
+            entry: timestamped({
+              kind: "system_init",
+              provider: "codex",
+              model: "gpt-5.4",
+              tools: [],
+              agents: [],
+              slashCommands: [],
+              mcpServers: [],
+            }),
+          }
+          yield {
+            type: "transcript" as const,
+            entry: timestamped({
+              kind: "result",
+              subtype: "success",
+              isError: false,
+              durationMs: 0,
+              result: "",
+            }),
+          }
+        }
+
+        return {
+          provider: "codex",
+          stream: stream(),
+          interrupt: async () => {},
+          close: () => {},
+        }
+      },
+    }
+
+    const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-agent-attachments-"))
+    const uploadedAttachment = await persistProjectUpload({
+      projectId: "project-1",
+      localPath: projectDir,
+      fileName: "todo.txt",
+      bytes: new TextEncoder().encode("todo"),
+      fallbackMimeType: "text/plain",
+    })
+
+    const store = createFakeStore({ localPath: projectDir })
+    const coordinator = new AgentCoordinator({
+      store: store as never,
+      onStateChange: () => {},
+      codexManager: fakeCodexManager as never,
+      generateTitle: async () => ({
+        title: "Review todo.txt",
+        usedFallback: true,
+        failureMessage: null,
+      }),
+    })
+
+    try {
+      await coordinator.send({
+        type: "chat.send",
+        chatId: "chat-1",
+        provider: "codex",
+        content: "   ",
+        attachments: [uploadedAttachment],
+        model: "gpt-5.4",
+      })
+
+      expect(store.chat.title).toBe("Review todo.txt")
+    } finally {
+      await rm(projectDir, { recursive: true, force: true })
+    }
   })
 
   test("binds codex provider and reuses the session token on later turns", async () => {
@@ -1169,7 +1260,7 @@ describe("AgentCoordinator codex integration", () => {
   })
 })
 
-function createFakeStore() {
+function createFakeStore(options?: { localPath?: string }) {
   const chat = {
     id: "chat-1",
     projectId: "project-1",
@@ -1180,7 +1271,7 @@ function createFakeStore() {
   }
   const project = {
     id: "project-1",
-    localPath: "/tmp/project",
+    localPath: options?.localPath ?? "/tmp/project",
   }
   return {
     chat,

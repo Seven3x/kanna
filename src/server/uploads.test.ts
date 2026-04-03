@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { deleteProjectUpload, inferAttachmentContentType, persistProjectUpload } from "./uploads"
+import { deleteProjectUpload, getStoredUploadNameFromContentUrl, inferAttachmentContentType, persistProjectUpload, resolveUploadedAttachments } from "./uploads"
 import { getProjectUploadDir } from "./paths"
 import { persistUploadedFiles, startKannaServer } from "./server"
 
@@ -114,6 +114,56 @@ describe("uploads", () => {
     expect(attachment.absolutePath).toBe(path.join(projectDir, ".kanna/uploads/pixel.png"))
     expect(attachment.relativePath).toBe("./.kanna/uploads/pixel.png")
     expect(attachment.contentUrl).toBe("/api/projects/project-2/uploads/pixel.png/content")
+  })
+
+  test("resolves trusted attachment metadata from stored uploads", async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-upload-resolve-"))
+    tempDirs.push(projectDir)
+
+    const attachment = await persistProjectUpload({
+      projectId: "project-2",
+      localPath: projectDir,
+      fileName: "pixel.png",
+      bytes: Buffer.from(PNG_BASE64, "base64"),
+    })
+
+    const resolved = await resolveUploadedAttachments({
+      projectId: "project-2",
+      localPath: projectDir,
+      attachments: [{
+        ...attachment,
+        absolutePath: "/tmp/forged-path.png",
+        relativePath: "./forged.png",
+        mimeType: "text/plain",
+        size: 1,
+      }],
+    })
+
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]?.absolutePath).toBe(path.join(projectDir, ".kanna/uploads/pixel.png"))
+    expect(resolved[0]?.relativePath).toBe("./.kanna/uploads/pixel.png")
+    expect(resolved[0]?.mimeType).toBe("image/png")
+    expect(resolved[0]?.kind).toBe("image")
+    expect(resolved[0]?.size).toBeGreaterThan(1)
+  })
+
+  test("rejects attachment references from another project", async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-upload-invalid-project-"))
+    tempDirs.push(projectDir)
+
+    const attachment = await persistProjectUpload({
+      projectId: "project-2",
+      localPath: projectDir,
+      fileName: "notes.txt",
+      bytes: new TextEncoder().encode("hello"),
+      fallbackMimeType: "text/plain",
+    })
+
+    await expect(resolveUploadedAttachments({
+      projectId: "project-1",
+      localPath: projectDir,
+      attachments: [attachment],
+    })).rejects.toThrow("Invalid attachment reference")
   })
 
   test("serves uploaded attachment content through the project content URL", async () => {
@@ -295,5 +345,11 @@ describe("uploads", () => {
     expect(inferAttachmentContentType("README.md")).toBe("text/markdown; charset=utf-8")
     expect(inferAttachmentContentType("main.ts", "video/mp2t")).toBe("text/plain; charset=utf-8")
     expect(inferAttachmentContentType("archive.zip", "application/zip")).toBe("application/zip")
+  })
+
+  test("extracts stored upload names from project content URLs", () => {
+    expect(getStoredUploadNameFromContentUrl("/api/projects/project-1/uploads/spec.pdf/content", "project-1")).toBe("spec.pdf")
+    expect(getStoredUploadNameFromContentUrl("/api/projects/project-2/uploads/spec.pdf/content", "project-1")).toBeNull()
+    expect(getStoredUploadNameFromContentUrl("/api/projects/project-1/uploads/..%2Fsecret/content", "project-1")).toBeNull()
   })
 })
