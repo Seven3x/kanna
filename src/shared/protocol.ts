@@ -1,6 +1,7 @@
 import type {
   AgentProvider,
   ChatSnapshot,
+  CodexUsageSnapshot,
   KeybindingsSnapshot,
   LocalProjectsSnapshot,
   ModelOptions,
@@ -49,6 +50,7 @@ export type ClientCommand =
   | { type: "update.check"; force?: boolean }
   | { type: "update.install" }
   | { type: "settings.readKeybindings" }
+  | { type: "settings.readCodexUsage" }
   | { type: "settings.writeKeybindings"; bindings: KeybindingsSnapshot["bindings"] }
   | {
       type: "system.openExternal"
@@ -91,6 +93,10 @@ export type ServerSnapshot =
   | { type: "keybindings"; data: KeybindingsSnapshot }
   | { type: "chat"; data: ChatSnapshot | null }
   | { type: "terminal"; data: TerminalSnapshot | null }
+
+export type ServerCommandResult =
+  | KeybindingsSnapshot
+  | CodexUsageSnapshot
 
 export type ServerEnvelope =
   | { v: 1; type: "snapshot"; id: string; snapshot: ServerSnapshot }

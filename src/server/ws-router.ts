@@ -10,6 +10,7 @@ import { KeybindingsManager } from "./keybindings"
 import { ensureProjectDirectory } from "./paths"
 import { TerminalManager } from "./terminal-manager"
 import type { UpdateManager } from "./update-manager"
+import { deriveCodexUsageSnapshot } from "./codex-usage"
 import { deriveChatSnapshot, deriveLocalProjectsSnapshot, deriveSidebarData } from "./read-models"
 
 export interface ClientState {
@@ -229,6 +230,15 @@ export function createWsRouter({
         }
         case "settings.readKeybindings": {
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: keybindings.getSnapshot() })
+          return
+        }
+        case "settings.readCodexUsage": {
+          send(ws, {
+            v: PROTOCOL_VERSION,
+            type: "ack",
+            id,
+            result: deriveCodexUsageSnapshot(store.state, (chatId) => store.getMessages(chatId)),
+          })
           return
         }
         case "settings.writeKeybindings": {

@@ -12,6 +12,12 @@ export interface ProjectFileListResponse {
   entries: ProjectFileEntry[]
 }
 
+export interface ProjectFileUploadResponse {
+  projectId: string
+  path: string
+  uploaded: string[]
+}
+
 export type ProjectFilePreviewKind = "text" | "image" | "binary"
 
 export interface ProjectFilePreviewResponse {

@@ -18,7 +18,7 @@ import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useNavigate, useOutletContext, useParams } from "react-router-dom"
 import { getKeybindingsFilePathDisplay, SDK_CLIENT_APP } from "../../shared/branding"
-import { DEFAULT_KEYBINDINGS, PROVIDERS, type AgentProvider, type KeybindingAction, type UpdateSnapshot } from "../../shared/types"
+import { DEFAULT_KEYBINDINGS, PROVIDERS, type AgentProvider, type CodexUsageSnapshot, type KeybindingAction, type UpdateSnapshot } from "../../shared/types"
 import { markdownComponents } from "../components/messages/shared"
 import { ChatPreferenceControls } from "../components/chat-ui/ChatPreferenceControls"
 import { buttonVariants } from "../components/ui/button"
@@ -112,6 +112,7 @@ type GithubRelease = {
 }
 
 type ChangelogStatus = "idle" | "loading" | "success" | "error"
+type CodexUsageStatus = "idle" | "loading" | "success" | "error"
 
 type ChangelogCache = {
   expiresAt: number
@@ -205,6 +206,147 @@ export function formatPublishedDate(value: string | null) {
     day: "numeric",
     year: "numeric",
   }).format(parsed)
+}
+
+export function formatUsdAmount(value: number) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+export function formatCodexUsageDate(value: number | null) {
+  if (value === null) return "Never"
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(value)
+}
+
+export function CodexUsageCard({
+  status,
+  usage,
+  error,
+  onRefresh,
+}: {
+  status: CodexUsageStatus
+  usage: CodexUsageSnapshot | null
+  error: string | null
+  onRefresh: () => void
+}) {
+  if (status === "idle") {
+    return (
+      <div className="w-full max-w-[420px] rounded-2xl border border-border bg-card/30 px-4 py-4 text-sm text-muted-foreground">
+        <div className="space-y-3">
+          <div>
+            <div className="text-sm font-medium text-foreground">Codex Usage</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Load this local summary only when you explicitly request it.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+          >
+            Load usage
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === "loading") {
+    return (
+      <div className="w-full max-w-[420px] rounded-2xl border border-border bg-card/30 px-4 py-4 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>Loading Codex usage…</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === "error") {
+    return (
+      <div className="w-full max-w-[420px] rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-4">
+        <div className="text-sm text-destructive">{error ?? "Unable to load Codex usage."}</div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  const accountLabel = usage?.accountInfo?.email ?? usage?.accountInfo?.organization ?? "Unavailable"
+  const authLabel = usage?.accountInfo?.tokenSource ?? usage?.accountInfo?.apiKeySource ?? "Unavailable"
+
+  return (
+    <div className="w-full max-w-[420px] rounded-2xl border border-border bg-card/30 px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-foreground">Codex Usage</div>
+          <div className="mt-1 text-xs text-muted-foreground">Tracked from local Kanna Codex chats and imported history.</div>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
+        >
+          Refresh
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Local Spend</div>
+          <div className="mt-1 text-sm font-medium text-foreground">{formatUsdAmount(usage?.totalCostUsd ?? 0)}</div>
+        </div>
+        <div className="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Metered Turns</div>
+          <div className="mt-1 text-sm font-medium text-foreground">
+            {usage?.meteredTurnCount ?? 0} / {usage?.turnCount ?? 0}
+          </div>
+        </div>
+        <div className="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Chats</div>
+          <div className="mt-1 text-sm font-medium text-foreground">
+            {usage?.chatCount ?? 0}
+            {(usage?.importedChatCount ?? 0) > 0 ? ` (${usage?.importedChatCount} imported)` : ""}
+          </div>
+        </div>
+        <div className="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Last Active</div>
+          <div className="mt-1 text-sm font-medium text-foreground">{formatCodexUsageDate(usage?.lastActiveAt ?? null)}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Account</span>
+          <span className="truncate text-right text-foreground">{accountLabel}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Plan</span>
+          <span className="truncate text-right text-foreground">{usage?.accountInfo?.subscriptionType ?? "Unavailable"}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Auth Source</span>
+          <span className="truncate text-right text-foreground">{authLabel}</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function ChangelogSection({
@@ -377,6 +519,9 @@ export function SettingsPage() {
   const [changelogStatus, setChangelogStatus] = useState<ChangelogStatus>("idle")
   const [releases, setReleases] = useState<GithubRelease[]>([])
   const [changelogError, setChangelogError] = useState<string | null>(null)
+  const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>("idle")
+  const [codexUsage, setCodexUsage] = useState<CodexUsageSnapshot | null>(null)
+  const [codexUsageError, setCodexUsageError] = useState<string | null>(null)
   const selectedPage = resolveSettingsSectionId(sectionId) ?? "general"
   const isConnecting = state.connectionStatus === "connecting" || !state.localProjectsReady
   const machineName = state.localProjects?.machine.displayName ?? "Unavailable"
@@ -470,6 +615,19 @@ export function SettingsPage() {
       cancelled = true
     }
   }, [isConnecting, selectedPage])
+
+  async function loadCodexUsage() {
+    setCodexUsageStatus("loading")
+    setCodexUsageError(null)
+    try {
+      const snapshot = await state.socket.command<CodexUsageSnapshot>({ type: "settings.readCodexUsage" })
+      setCodexUsage(snapshot)
+      setCodexUsageStatus("success")
+    } catch (error) {
+      setCodexUsageError(error instanceof Error ? error.message : "Unable to load Codex usage.")
+      setCodexUsageStatus("error")
+    }
+  }
 
   function commitScrollback() {
     const nextValue = Number(scrollbackDraft)
@@ -909,6 +1067,21 @@ export function SettingsPage() {
                           className="justify-start flex-wrap"
                         />
                       </div>
+                    </SettingsRow>
+
+                    <SettingsRow
+                      title="Codex Usage"
+                      description="A local summary of Codex usage recorded by Kanna."
+                      alignStart
+                    >
+                      <CodexUsageCard
+                        status={codexUsageStatus}
+                        usage={codexUsage}
+                        error={codexUsageError}
+                        onRefresh={() => {
+                          void loadCodexUsage()
+                        }}
+                      />
                     </SettingsRow>
                   </div>
                 ) : selectedPage === "keybindings" ? (

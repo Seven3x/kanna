@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
-import { ChevronLeft, ChevronRight, Download, File, Folder, FolderOpen, RefreshCcw } from "lucide-react"
-import { buildProjectFileRawUrl, fetchProjectFileList, getParentProjectFilePath } from "../../lib/projectFiles"
+import { useEffect, useRef, useState } from "react"
+import { ChevronLeft, ChevronRight, Download, File, Folder, FolderOpen, RefreshCcw, Upload } from "lucide-react"
+import { buildProjectFileRawUrl, fetchProjectFileList, getParentProjectFilePath, uploadProjectFiles } from "../../lib/projectFiles"
 import { cn } from "../../lib/utils"
 import type { ProjectFileListResponse } from "../../../shared/project-files"
 import { Button, buttonVariants } from "../ui/button"
@@ -19,6 +19,18 @@ type DirectoryState =
   | { status: "error"; message: string }
   | { status: "ready"; data: ProjectFileListResponse }
 
+export function splitFileNameForDisplay(name: string): { base: string; extension: string } {
+  const lastDotIndex = name.lastIndexOf(".")
+  if (lastDotIndex <= 0 || lastDotIndex === name.length - 1) {
+    return { base: name, extension: "" }
+  }
+
+  return {
+    base: name.slice(0, lastDotIndex),
+    extension: name.slice(lastDotIndex),
+  }
+}
+
 export function ProjectFilesSidebar({
   projectId,
   localPath,
@@ -29,11 +41,15 @@ export function ProjectFilesSidebar({
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
   const [directoryState, setDirectoryState] = useState<DirectoryState>({ status: "loading" })
   const [refreshKey, setRefreshKey] = useState(0)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     setCurrentPath("")
     setSelectedFilePath(null)
     setRefreshKey(0)
+    setUploadError(null)
   }, [projectId])
 
   useEffect(() => {
@@ -59,6 +75,29 @@ export function ProjectFilesSidebar({
 
   const canGoUp = currentPath.length > 0
   const currentLocationLabel = currentPath ? `/${currentPath}` : localPath ?? "Project files"
+  const hasPreview = selectedFilePath !== null
+
+  async function handleUploadFiles(fileList: FileList | null) {
+    const files = fileList ? Array.from(fileList) : []
+    if (files.length === 0) {
+      return
+    }
+
+    setUploadError(null)
+    setIsUploading(true)
+
+    try {
+      await uploadProjectFiles(projectId, files, currentPath)
+      setRefreshKey((value) => value + 1)
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    }
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -83,16 +122,50 @@ export function ProjectFilesSidebar({
               type="button"
               variant="ghost"
               size="icon-sm"
+              aria-label="Upload files"
+              title="Upload files"
+              disabled={isUploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
               aria-label="Refresh file list"
+              disabled={isUploading}
               onClick={() => setRefreshKey((value) => value + 1)}
             >
               <RefreshCcw className="h-3.5 w-3.5" />
             </Button>
           </div>
         </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            void handleUploadFiles(event.target.files)
+          }}
+        />
+        {uploadError ? (
+          <div className="pt-2 text-xs text-destructive">{uploadError}</div>
+        ) : null}
+        {isUploading ? (
+          <div className="pt-2 text-xs text-muted-foreground">Uploading files...</div>
+        ) : null}
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(220px,40%)]">
+      <div
+        className={cn(
+          "grid min-h-0 flex-1",
+          hasPreview
+            ? "grid-rows-[minmax(0,1fr)_minmax(140px,28dvh)] md:grid-rows-[minmax(0,1fr)_minmax(220px,40%)]"
+            : "grid-rows-[minmax(0,1fr)_0fr] md:grid-rows-[minmax(0,1fr)_minmax(220px,40%)]"
+        )}
+      >
         <ScrollArea className="min-h-0">
           {directoryState.status === "loading" ? (
             <div className="px-3 py-4 text-sm text-muted-foreground">Loading files...</div>
@@ -110,6 +183,7 @@ export function ProjectFilesSidebar({
 
               {directoryState.data.entries.map((entry) => {
                 const isSelected = entry.path === selectedFilePath
+                const fileName = splitFileNameForDisplay(entry.name)
 
                 return (
                   <div
@@ -135,7 +209,10 @@ export function ProjectFilesSidebar({
                       ) : (
                         <File className="h-4 w-4 shrink-0 text-muted-foreground" />
                       )}
-                      <span className="truncate">{entry.name}</span>
+                      <span className="flex min-w-0 flex-1 items-baseline">
+                        <span className="truncate">{fileName.base}</span>
+                        {fileName.extension ? <span className="shrink-0">{fileName.extension}</span> : null}
+                      </span>
                       {entry.isDirectory ? <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : null}
                     </button>
 
@@ -156,7 +233,7 @@ export function ProjectFilesSidebar({
           ) : null}
         </ScrollArea>
 
-        <div className="min-h-0 border-t border-border">
+        <div className={cn("min-h-0 overflow-hidden border-t border-border", !hasPreview && "border-t-0")}>
           <ProjectFilePreviewPanel
             projectId={projectId}
             filePath={selectedFilePath}

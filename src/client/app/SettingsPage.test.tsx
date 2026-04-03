@@ -2,9 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { RefreshCw } from "lucide-react"
 import {
+  CodexUsageCard,
   ChangelogSection,
+  formatCodexUsageDate,
   fetchGithubReleases,
   formatPublishedDate,
+  formatUsdAmount,
   getGeneralHeaderAction,
   getCachedChangelog,
   getKeybindingsSubtitle,
@@ -199,6 +202,32 @@ describe("getGeneralHeaderAction", () => {
       label: "Update",
       variant: "default",
     })
+  })
+})
+
+describe("codex usage formatting", () => {
+  test("formats usd amounts with a currency symbol", () => {
+    expect(formatUsdAmount(12.5)).toContain("12.50")
+  })
+
+  test("formats missing codex activity timestamps", () => {
+    expect(formatCodexUsageDate(null)).toBe("Never")
+  })
+
+  test("renders codex usage as an explicit manual action while idle", () => {
+    const html = renderToStaticMarkup(
+      <CodexUsageCard
+        status="idle"
+        usage={null}
+        error={null}
+        onRefresh={() => {}}
+      />
+    )
+
+    expect(html).toContain("Codex Usage")
+    expect(html).toContain("Load this local summary only when you explicitly request it.")
+    expect(html).toContain("Load usage")
+    expect(html).not.toContain("Loading Codex usage")
   })
 })
 

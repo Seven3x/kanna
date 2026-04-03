@@ -284,6 +284,16 @@ export interface AccountInfo {
   apiKeySource?: string
 }
 
+export interface CodexUsageSnapshot {
+  accountInfo: AccountInfo | null
+  chatCount: number
+  importedChatCount: number
+  turnCount: number
+  meteredTurnCount: number
+  totalCostUsd: number
+  lastActiveAt: number | null
+}
+
 export interface AskUserQuestionOption {
   label: string
   description?: string

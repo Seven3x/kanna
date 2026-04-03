@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { KeybindingsSnapshot, UpdateSnapshot } from "../shared/types"
+import type { CodexUsageSnapshot, KeybindingsSnapshot, UpdateSnapshot } from "../shared/types"
 import { PROTOCOL_VERSION } from "../shared/types"
 import { createEmptyState } from "./events"
 import { createWsRouter } from "./ws-router"
@@ -263,6 +263,67 @@ describe("ws-router", () => {
         },
         warning: null,
         filePathDisplay: "~/.kanna/keybindings.json",
+      },
+    })
+  })
+
+  test("reads codex usage through the router", () => {
+    const usageSnapshot: CodexUsageSnapshot = {
+      accountInfo: { email: "coder@example.com", subscriptionType: "pro" },
+      chatCount: 3,
+      importedChatCount: 1,
+      turnCount: 9,
+      meteredTurnCount: 7,
+      totalCostUsd: 4.25,
+      lastActiveAt: 123,
+    }
+    const router = createWsRouter({
+      store: {
+        state: createEmptyState(),
+        getMessages: () => [],
+      } as never,
+      agent: { getActiveStatuses: () => new Map() } as never,
+      terminals: {
+        getSnapshot: () => null,
+        onEvent: () => () => {},
+      } as never,
+      keybindings: {
+        getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
+        onChange: () => () => {},
+      } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
+      refreshDiscovery: async () => [],
+      getDiscoveredProjects: () => [],
+      machineDisplayName: "Local Machine",
+      updateManager: null,
+    })
+    const ws = new FakeWebSocket()
+
+    const originalGetMessages = (router as never)
+    void originalGetMessages
+
+    router.handleMessage(
+      ws as never,
+      JSON.stringify({
+        v: 1,
+        type: "command",
+        id: "codex-usage-1",
+        command: { type: "settings.readCodexUsage" },
+      })
+    )
+
+    expect(ws.sent[0]).toEqual({
+      v: PROTOCOL_VERSION,
+      type: "ack",
+      id: "codex-usage-1",
+      result: {
+        accountInfo: null,
+        chatCount: 0,
+        importedChatCount: 0,
+        turnCount: 0,
+        meteredTurnCount: 0,
+        totalCostUsd: 0,
+        lastActiveAt: null,
       },
     })
   })

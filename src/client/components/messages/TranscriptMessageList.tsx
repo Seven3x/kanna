@@ -145,7 +145,7 @@ export function TranscriptMessageList({
         }
         if (message.toolKind === "todo_write") {
           if (!readOnly && message.id !== resolvedLatestToolIds.TodoWrite) return null
-          return <TodoWriteMessage key={message.id} message={message} />
+          return <TodoWriteMessage key={message.id} message={message} isActive={isLoading} />
         }
         return (
           <ToolCallMessage

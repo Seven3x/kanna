@@ -1,4 +1,8 @@
-import type { ProjectFileListResponse, ProjectFilePreviewResponse } from "../../shared/project-files"
+import type {
+  ProjectFileListResponse,
+  ProjectFilePreviewResponse,
+  ProjectFileUploadResponse,
+} from "../../shared/project-files"
 
 function withPathQuery(basePath: string, filePath?: string) {
   if (!filePath) {
@@ -59,6 +63,20 @@ export async function fetchProjectFileList(projectId: string, filePath = "", sig
 export async function fetchProjectFilePreview(projectId: string, filePath: string, signal?: AbortSignal) {
   const response = await fetch(buildProjectFilePreviewUrl(projectId, filePath), { signal })
   return readProjectFilesResponse<ProjectFilePreviewResponse>(response, "Failed to preview file")
+}
+
+export async function uploadProjectFiles(projectId: string, files: File[], filePath = "") {
+  const formData = new FormData()
+  for (const file of files) {
+    formData.append("files", file, file.name)
+  }
+
+  const response = await fetch(buildProjectFileListUrl(projectId, filePath), {
+    method: "POST",
+    body: formData,
+  })
+
+  return readProjectFilesResponse<ProjectFileUploadResponse>(response, "Failed to upload files")
 }
 
 export function getProjectRelativeFilePath(projectRoot: string | undefined | null, filePath: string | undefined | null) {

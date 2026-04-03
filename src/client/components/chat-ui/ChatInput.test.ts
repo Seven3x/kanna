@@ -54,6 +54,37 @@ describe("resolvePlanModeState", () => {
     })
   })
 
+  test("initializes locked Codex state from provider defaults instead of current composer settings", () => {
+    const result = resolvePlanModeState({
+      providerLocked: true,
+      planMode: false,
+      selectedProvider: "codex",
+      composerState: {
+        provider: "codex",
+        model: "gpt-5.4",
+        modelOptions: { reasoningEffort: "xhigh", fastMode: true },
+        planMode: true,
+      },
+      providerDefaults: {
+        ...INITIAL_STATE.providerDefaults,
+        codex: {
+          model: "gpt-5.4",
+          modelOptions: { reasoningEffort: "high", fastMode: false },
+          planMode: false,
+        },
+      },
+      lockedComposerState: null,
+    })
+
+    expect(result.composerPlanMode).toBe(true)
+    expect(result.lockedComposerState).toEqual({
+      provider: "codex",
+      model: "gpt-5.4",
+      modelOptions: { reasoningEffort: "high", fastMode: false },
+      planMode: false,
+    })
+  })
+
   test("reuses existing locked state instead of resetting to provider defaults", () => {
     const result = resolvePlanModeState({
       providerLocked: true,

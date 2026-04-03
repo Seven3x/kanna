@@ -1,6 +1,11 @@
-import { lstat, open, readdir, realpath, stat } from "node:fs/promises"
+import { lstat, open, readdir, realpath, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
-import type { ProjectFileListResponse, ProjectFilePreviewKind, ProjectFilePreviewResponse } from "../shared/project-files"
+import type {
+  ProjectFileListResponse,
+  ProjectFilePreviewKind,
+  ProjectFilePreviewResponse,
+  ProjectFileUploadResponse,
+} from "../shared/project-files"
 import { resolveLocalPath } from "./paths"
 import { EventStore } from "./event-store"
 
@@ -236,6 +241,53 @@ export async function readProjectFileResponse(
   })
 }
 
+function normalizeUploadFilename(filename: string) {
+  const trimmed = filename.trim()
+  if (!trimmed) {
+    throw new ProjectFileError(400, "Uploaded file is missing a name")
+  }
+
+  const baseName = path.posix.basename(trimmed.replaceAll("\\", "/"))
+  if (!baseName || baseName === "." || baseName === "..") {
+    throw new ProjectFileError(400, "Uploaded file has an invalid name")
+  }
+
+  return baseName
+}
+
+export async function uploadProjectFiles(
+  store: EventStore,
+  projectId: string,
+  rawPath: string | null,
+  formData: FormData,
+): Promise<ProjectFileUploadResponse> {
+  const { relativePath, absolutePath } = await resolveProjectPath(store, projectId, rawPath, "directory")
+  const files = formData.getAll("files")
+  if (files.length === 0) {
+    throw new ProjectFileError(400, "No files were provided")
+  }
+
+  const uploaded: string[] = []
+
+  for (const entry of files) {
+    if (!(entry instanceof File)) {
+      throw new ProjectFileError(400, "Invalid upload payload")
+    }
+
+    const fileName = normalizeUploadFilename(entry.name)
+    const targetPath = path.join(absolutePath, fileName)
+    const relativeTargetPath = relativePath ? path.posix.join(relativePath, fileName) : fileName
+    await writeFile(targetPath, new Uint8Array(await entry.arrayBuffer()))
+    uploaded.push(relativeTargetPath)
+  }
+
+  return {
+    projectId,
+    path: relativePath,
+    uploaded,
+  }
+}
+
 export async function handleProjectFilesRequest(req: Request, store: EventStore) {
   const url = new URL(req.url)
   const match = PROJECT_FILE_ROUTE.exec(url.pathname)
@@ -243,11 +295,11 @@ export async function handleProjectFilesRequest(req: Request, store: EventStore)
     return null
   }
 
-  if (req.method !== "GET") {
+  if (req.method !== "GET" && req.method !== "POST") {
     return new Response("Method Not Allowed", {
       status: 405,
       headers: {
-        Allow: "GET",
+        Allow: "GET, POST",
       },
     })
   }
@@ -257,7 +309,18 @@ export async function handleProjectFilesRequest(req: Request, store: EventStore)
     const rawPath = url.searchParams.get("path")
 
     if (resource === "files") {
+      if (req.method === "POST") {
+        return Response.json(await uploadProjectFiles(store, projectId, rawPath, await req.formData()))
+      }
       return Response.json(await listProjectDirectory(store, projectId, rawPath))
+    }
+    if (req.method !== "GET") {
+      return new Response("Method Not Allowed", {
+        status: 405,
+        headers: {
+          Allow: "GET",
+        },
+      })
     }
     if (resource === "preview") {
       return Response.json(await previewProjectFile(store, projectId, rawPath))

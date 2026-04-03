@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { listProjectDirectory, previewProjectFile } from "./project-files"
+import { listProjectDirectory, previewProjectFile, uploadProjectFiles } from "./project-files"
 import type { EventStore } from "./event-store"
 
 const tempDirs: string[] = []
@@ -62,5 +62,17 @@ describe("project file helpers", () => {
     await expect(previewProjectFile(createStore("project-1", projectRoot), "project-1", "../etc/passwd")).rejects.toThrow(
       "Invalid file path"
     )
+  })
+
+  test("uploads files into the selected project directory", async () => {
+    const projectRoot = await createTempProject()
+    await mkdir(path.join(projectRoot, "assets"))
+    const formData = new FormData()
+    formData.append("files", new File(["hello"], "greeting.txt", { type: "text/plain" }))
+
+    const result = await uploadProjectFiles(createStore("project-1", projectRoot), "project-1", "assets", formData)
+
+    expect(result.uploaded).toEqual(["assets/greeting.txt"])
+    expect(await readFile(path.join(projectRoot, "assets", "greeting.txt"), "utf8")).toBe("hello")
   })
 })

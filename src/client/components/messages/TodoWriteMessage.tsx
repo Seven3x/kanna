@@ -10,9 +10,25 @@ const STATUS_CONFIG = {
 
 interface Props {
   message: Extract<ProcessedToolCall, { toolKind: "todo_write" }>
+  isActive?: boolean
 }
 
-export function TodoWriteMessage({ message }: Props) {
+function getTodoAppearance(
+  todo: Props["message"]["input"]["todos"][number],
+  isActive: boolean
+) {
+  if (todo.status === "in_progress" && !isActive) {
+    return {
+      Icon: Circle,
+      iconClass: "text-amber-500",
+      textClass: "text-foreground",
+    }
+  }
+
+  return STATUS_CONFIG[todo.status]
+}
+
+export function TodoWriteMessage({ message, isActive = false }: Props) {
   const todos = message.input.todos
 
   if (!todos.length) return null
@@ -27,7 +43,7 @@ export function TodoWriteMessage({ message }: Props) {
         <div>
           {todos.map((todo, index) => {
             const isLast = index === todos.length - 1
-            const { Icon, iconClass, textClass } = STATUS_CONFIG[todo.status]
+            const { Icon, iconClass, textClass } = getTodoAppearance(todo, isActive)
             return (
               <div
                 key={index}
