@@ -15,6 +15,23 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
+async function startTestServer() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const port = 20000 + Math.floor(Math.random() * 20000)
+
+    try {
+      return await startKannaServer({ port, strictPort: true })
+    } catch (error) {
+      const code = typeof error === "object" && error && "code" in error ? error.code : null
+      if (code !== "EADDRINUSE" || attempt === 19) {
+        throw error
+      }
+    }
+  }
+
+  throw new Error("Failed to start test server")
+}
+
 describe("uploads", () => {
   test("stores uploads in .kanna/uploads and keeps duplicate filenames", async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-upload-test-"))
@@ -103,7 +120,7 @@ describe("uploads", () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-project-"))
     tempDirs.push(projectDir)
 
-    const server = await startKannaServer({ port: 4310, strictPort: true })
+    const server = await startTestServer()
 
     try {
       const project = await server.store.openProject(projectDir, "Project")
@@ -128,7 +145,7 @@ describe("uploads", () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-project-typescript-"))
     tempDirs.push(projectDir)
 
-    const server = await startKannaServer({ port: 4314, strictPort: true })
+    const server = await startTestServer()
 
     try {
       const project = await server.store.openProject(projectDir, "Project")
@@ -153,7 +170,7 @@ describe("uploads", () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-project-content-method-"))
     tempDirs.push(projectDir)
 
-    const server = await startKannaServer({ port: 4312, strictPort: true })
+    const server = await startTestServer()
 
     try {
       const project = await server.store.openProject(projectDir, "Project")
@@ -177,7 +194,7 @@ describe("uploads", () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-project-oversize-"))
     tempDirs.push(projectDir)
 
-    const server = await startKannaServer({ port: 4313, strictPort: true })
+    const server = await startTestServer()
 
     try {
       const project = await server.store.openProject(projectDir, "Project")
@@ -251,7 +268,7 @@ describe("uploads", () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), "kanna-project-delete-"))
     tempDirs.push(projectDir)
 
-    const server = await startKannaServer({ port: 4311, strictPort: true })
+    const server = await startTestServer()
 
     try {
       const project = await server.store.openProject(projectDir, "Project")
