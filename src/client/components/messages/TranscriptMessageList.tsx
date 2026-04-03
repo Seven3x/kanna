@@ -106,7 +106,7 @@ export function TranscriptMessageList({
   )
   function renderMessage(message: HydratedTranscriptMessage, index: number): React.ReactNode {
     if (message.kind === "user_prompt") {
-      return <UserMessage key={message.id} content={message.content} skills={skills} />
+      return <UserMessage key={message.id} content={message.content} attachments={message.attachments} skills={skills} />
     }
 
     switch (message.kind) {

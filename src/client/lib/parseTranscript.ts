@@ -247,6 +247,7 @@ export function processTranscriptMessages(entries: TranscriptEntry[]): HydratedT
           ...createBaseMessage(entry),
           kind: "user_prompt",
           content: entry.content,
+          attachments: entry.attachments ?? [],
         })
         break
       case "system_init":

@@ -47,6 +47,75 @@ function readFileChangePaths(value: unknown, localPath?: string | null): string[
     })
     .filter((entry): entry is string => Boolean(entry))
 }
+type ReadImageBlock = {
+  type: "image"
+  data: string
+  mimeType?: string
+}
+
+function extractReadImageBlocks(value: unknown): ReadImageBlock[] {
+  const blocks = (
+    value
+    && typeof value === "object"
+    && "content" in value
+    && Array.isArray((value as { content?: unknown }).content)
+  )
+    ? (value as { content: unknown[] }).content
+    : Array.isArray(value)
+      ? value
+      : []
+
+  return blocks.flatMap((block) => {
+    if (!block || typeof block !== "object" || !("type" in block) || block.type !== "image") {
+      return []
+    }
+
+    if ("data" in block && typeof block.data === "string") {
+      return [{
+        type: "image",
+        data: block.data,
+        mimeType: typeof block.mimeType === "string" ? block.mimeType : undefined,
+      } satisfies ReadImageBlock]
+    }
+
+    if (
+      "source" in block
+      && block.source
+      && typeof block.source === "object"
+      && "type" in block.source
+      && block.source.type === "base64"
+      && "data" in block.source
+      && typeof block.source.data === "string"
+    ) {
+      return [{
+        type: "image",
+        data: block.source.data,
+        mimeType: typeof block.source.media_type === "string" ? block.source.media_type : undefined,
+      } satisfies ReadImageBlock]
+    }
+
+    return []
+  })
+}
+
+export function ReadResultImages({ images }: { images: ReadonlyArray<ReadImageBlock> }) {
+  return (
+    <div className="flex flex-col gap-3">
+      {images.map((image, index) => {
+        const mimeType = image.mimeType || "image/png"
+        return (
+          <div key={`${mimeType}:${index}`} className="overflow-hidden rounded-lg border border-border bg-muted/20">
+            <img
+              src={`data:${mimeType};base64,${image.data}`}
+              alt={`Read result ${index + 1}`}
+              className="max-h-[50vh] w-full object-contain bg-background"
+            />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 export function ToolCallMessage({ message, isLoading = false, localPath, projectId, onOpenProjectFile }: Props) {
   if (message.toolKind === "subagent_task") {
@@ -138,6 +207,24 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
     return JSON.stringify(message.result, null, 2)
   }, [message.result])
 
+  const readImages = useMemo(() => {
+    if (!isReadTool) {
+      return [] as ReadImageBlock[]
+    }
+
+    if (message.result && typeof message.result === "object" && "blocks" in message.result) {
+      const blocks = (message.result as { blocks?: unknown }).blocks
+      if (Array.isArray(blocks)) {
+        const hydratedBlocks = extractReadImageBlocks(blocks)
+        if (hydratedBlocks.length > 0) {
+          return hydratedBlocks
+        }
+      }
+    }
+
+    return extractReadImageBlocks(message.rawResult)
+  }, [isReadTool, message.rawResult, message.result])
+
   const inputText = useMemo(() => {
     switch (message.toolKind) {
       case "bash":
@@ -207,15 +294,28 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
                 </MetaCodeBlock>
               )}
               {hasResult && isReadTool && !message.isError && (
-                <>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground/80">File</span>
-                    <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
+                readImages.length > 0 ? (
+                  <div>
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground/80">File</span>
+                      <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
+                    </div>
+                    <span className="font-medium text-muted-foreground">Image</span>
+                    <div className="mt-1">
+                      <ReadResultImages images={readImages} />
+                    </div>
                   </div>
-                  <FileContentView
-                    content={resultText}
-                  />
-                </>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground/80">File</span>
+                      <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
+                    </div>
+                    <FileContentView
+                      content={resultText}
+                    />
+                  </>
+                )
               )}
               {isWriteTool && !message.isError && (
                 <>

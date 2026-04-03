@@ -1,5 +1,6 @@
 import type {
   AgentProvider,
+  ChatAttachment,
   ChatSnapshot,
   CodexUsageSnapshot,
   KeybindingsSnapshot,
@@ -70,6 +71,7 @@ export type ClientCommand =
       projectId?: string
       provider?: AgentProvider
       content: string
+      attachments?: ChatAttachment[]
       model?: string
       modelOptions?: ModelOptions
       effort?: string

@@ -628,7 +628,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
 
   async function handleSend(
     content: string,
-    options?: { provider?: AgentProvider; model?: string; modelOptions?: ModelOptions; planMode?: boolean }
+    options?: { provider?: AgentProvider; model?: string; modelOptions?: ModelOptions; planMode?: boolean; attachments?: import("../../shared/types").ChatAttachment[] }
   ) {
     try {
       let projectId = selectedProjectId ?? sidebarData.projectGroups[0]?.groupKey ?? null
@@ -653,6 +653,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
         projectId: activeChatId ? undefined : projectId ?? undefined,
         provider: options?.provider,
         content,
+        attachments: options?.attachments,
         model: options?.model,
         modelOptions: options?.modelOptions,
         planMode: options?.planMode,
