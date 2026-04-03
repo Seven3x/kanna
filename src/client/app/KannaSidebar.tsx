@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Flower, Loader2, PanelLeft, X, Menu, Plus, Settings } from "lucide-react"
+import { Flower, PanelLeft, X, Menu, Plus, Settings } from "lucide-react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
 import { type KeybindingsSnapshot } from "../../shared/types"
@@ -8,7 +8,7 @@ import { cn } from "../lib/utils"
 import { getResolvedKeybindings } from "../lib/keybindings"
 import { ChatRow } from "../components/chat-ui/sidebar/ChatRow"
 import { LocalProjectsSection } from "../components/chat-ui/sidebar/LocalProjectsSection"
-import type { SidebarData, SidebarChatRow, UpdateSnapshot } from "../../shared/types"
+import type { SidebarData, SidebarChatRow } from "../../shared/types"
 import type { SocketStatus } from "./socket"
 import { useProjectGroupOrderStore } from "../stores/projectGroupOrderStore"
 
@@ -31,8 +31,6 @@ interface KannaSidebarProps {
   onRemoveProject: (projectId: string) => void
   editorLabel: string
   keybindings: KeybindingsSnapshot | null
-  updateSnapshot: UpdateSnapshot | null
-  onInstallUpdate: () => void
 }
 
 export function KannaSidebar({
@@ -54,8 +52,6 @@ export function KannaSidebar({
   onRemoveProject,
   editorLabel,
   keybindings,
-  updateSnapshot,
-  onInstallUpdate,
 }: KannaSidebarProps) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -172,12 +168,6 @@ export function KannaSidebar({
   const isConnecting = connectionStatus === "connecting" || !ready
   const statusLabel = isConnecting ? "Connecting" : connectionStatus === "connected" ? "Connected" : "Disconnected"
   const statusDotClass = connectionStatus === "connected" ? "bg-emerald-500" : "bg-amber-500"
-  const showUpdateButton = updateSnapshot?.updateAvailable === true
-  const showDevBadge = updateSnapshot
-    ? updateSnapshot.latestVersion === `${updateSnapshot.currentVersion}-dev`
-    : false
-  const isUpdating = updateSnapshot?.status === "updating" || updateSnapshot?.status === "restart_pending"
-
   return (
     <>
       {!open && showMobileOpenButton && (
@@ -232,26 +222,6 @@ export function KannaSidebar({
             
           </div>
           <div className="flex items-center">
-            {showDevBadge ? (
-              <span
-                className="mr-1 inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-bold tracking-wider text-muted-foreground"
-                title="Development build"
-              >
-                DEV
-              </span>
-            ) : showUpdateButton ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-full !h-auto mr-1 py-0.5 px-2 bg-logo/20 hover:bg-logo text-logo border-logo/20 hover:text-foreground hover:border-logo/20  text-[11px] font-bold tracking-wider"
-                onClick={onInstallUpdate}
-                disabled={isUpdating}
-                title={updateSnapshot?.latestVersion ? `Update to ${updateSnapshot.latestVersion}` : "Update Kanna"}
-              >
-                {isUpdating ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
-                UPDATE
-              </Button>
-            ) : null}
             <Button
               variant="ghost"
               size="icon"
