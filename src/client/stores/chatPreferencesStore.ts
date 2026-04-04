@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware"
 import {
   DEFAULT_CLAUDE_MODEL_OPTIONS,
   DEFAULT_CODEX_MODEL_OPTIONS,
+  getCodexModelOption,
   normalizeClaudeContextWindow,
   isClaudeReasoningEffort,
   isCodexReasoningEffort,
@@ -97,7 +98,8 @@ type PersistedChatPreferencesState = Pick<
 > & LegacyPersistedChatPreferencesState
 
 function normalizeCodexModel(model?: string) {
-  return model === "gpt-5-codex" ? "gpt-5.3-codex" : (model ?? "gpt-5.4")
+  if (!model) return "gpt-5.4"
+  return getCodexModelOption(model)?.id ?? "gpt-5.4"
 }
 
 function normalizeDefaultProvider(value?: string): DefaultProviderPreference {

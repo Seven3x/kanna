@@ -9,6 +9,7 @@ import type {
   ServiceTier,
 } from "../shared/types"
 import {
+  CODEX_PROVIDER_MODELS,
   DEFAULT_CLAUDE_MODEL_OPTIONS,
   DEFAULT_CODEX_MODEL_OPTIONS,
   PROVIDERS,
@@ -17,11 +18,7 @@ import {
   isCodexReasoningEffort,
 } from "../shared/types"
 
-const HARD_CODED_CODEX_MODELS: ProviderModelOption[] = [
-  { id: "gpt-5.4", label: "GPT-5.4", supportsEffort: false },
-  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", supportsEffort: false },
-  { id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", supportsEffort: false },
-]
+const HARD_CODED_CODEX_MODELS: ProviderModelOption[] = [...CODEX_PROVIDER_MODELS]
 
 export const SERVER_PROVIDERS: ProviderCatalogEntry[] = PROVIDERS.map((provider) =>
   provider.id === "codex"

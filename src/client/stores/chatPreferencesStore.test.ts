@@ -231,6 +231,29 @@ describe("chat preference store", () => {
     })
   })
 
+  test("keeps supported Codex models instead of normalizing them away", () => {
+    useChatPreferencesStore.setState({
+      ...INITIAL_STATE,
+      providerDefaults: {
+        ...INITIAL_STATE.providerDefaults,
+        codex: {
+          model: "gpt-5.2-codex",
+          modelOptions: { reasoningEffort: "high", fastMode: false },
+          planMode: false,
+        },
+      },
+    })
+
+    useChatPreferencesStore.getState().resetChatComposerFromProvider("chat-a", "codex")
+
+    expect(useChatPreferencesStore.getState().getComposerState("chat-a")).toEqual({
+      provider: "codex",
+      model: "gpt-5.2-codex",
+      modelOptions: { reasoningEffort: "high", fastMode: false },
+      planMode: false,
+    })
+  })
+
   test("removeChatState deletes persisted composer state for a chat", () => {
     const store = useChatPreferencesStore.getState()
 

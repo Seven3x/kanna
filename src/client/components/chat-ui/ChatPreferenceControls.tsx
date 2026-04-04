@@ -55,8 +55,14 @@ export const MODEL_ICON_BY_ID: Record<string, typeof Box> = {
   sonnet: Box,
   haiku: Box,
   "gpt-5.4": Box,
+  "gpt-5.4-mini": Box,
   "gpt-5.3-codex": Box,
   "gpt-5.3-codex-spark": Box,
+  "gpt-5.2": Box,
+  "gpt-5.2-codex": Box,
+  "gpt-5-codex": Box,
+  "gpt-5.1-codex-max": Box,
+  "gpt-5.1-codex-mini": Box,
 }
 
 export function PopoverMenuItem({

@@ -105,6 +105,18 @@ export function isClaudeContextWindow(value: unknown): value is ClaudeContextWin
   return CLAUDE_CONTEXT_WINDOW_OPTIONS.some((option) => option.id === value)
 }
 
+export const CODEX_PROVIDER_MODELS = [
+  { id: "gpt-5.4", label: "GPT-5.4", supportsEffort: false },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", supportsEffort: false },
+  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", supportsEffort: false },
+  { id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", supportsEffort: false },
+  { id: "gpt-5.2", label: "GPT-5.2", supportsEffort: false },
+  { id: "gpt-5.2-codex", label: "GPT-5.2 Codex", supportsEffort: false },
+  { id: "gpt-5-codex", label: "GPT-5 Codex", supportsEffort: false },
+  { id: "gpt-5.1-codex-max", label: "GPT-5.1 Codex Max", supportsEffort: false },
+  { id: "gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini", supportsEffort: false },
+] as const satisfies readonly ProviderModelOption[]
+
 export interface ProviderCatalogEntry {
   id: AgentProvider
   label: string
@@ -134,11 +146,7 @@ export const PROVIDERS: ProviderCatalogEntry[] = [
     label: "Codex",
     defaultModel: "gpt-5.4",
     supportsPlanMode: true,
-    models: [
-      { id: "gpt-5.4", label: "GPT-5.4", supportsEffort: false },
-      { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", supportsEffort: false },
-      { id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", supportsEffort: false },
-    ],
+    models: [...CODEX_PROVIDER_MODELS],
     efforts: [],
   },
 ]
@@ -153,6 +161,10 @@ export function getProviderCatalog(provider: AgentProvider): ProviderCatalogEntr
 
 export function getClaudeModelOption(modelId: string): ProviderModelOption | undefined {
   return getProviderCatalog("claude").models.find((candidate) => candidate.id === modelId)
+}
+
+export function getCodexModelOption(modelId: string): ProviderModelOption | undefined {
+  return getProviderCatalog("codex").models.find((candidate) => candidate.id === modelId)
 }
 
 export function getClaudeContextWindowOptions(modelId: string): readonly ProviderContextWindowOption[] {
