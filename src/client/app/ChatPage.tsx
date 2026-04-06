@@ -214,6 +214,37 @@ export function ChatPage() {
     void state.handleOpenLocalLink({ path: resolvedPath })
   }, [state.handleOpenLocalLink, state.navbarLocalPath, state.runtime?.localPath])
 
+  const handleCommitDiffs = useCallback(async (args: { paths: string[]; summary: string; description: string }) => {
+    if (!state.activeChatId) {
+      return
+    }
+    await state.socket.command({
+      type: "chat.commitDiffs",
+      chatId: state.activeChatId,
+      paths: args.paths,
+      summary: args.summary,
+      description: args.description,
+    })
+    refreshDiffs()
+  }, [refreshDiffs, state.activeChatId, state.socket])
+
+  const handleGenerateCommitMessage = useCallback(async (args: { paths: string[] }) => {
+    if (!state.activeChatId) {
+      return { subject: "", body: "" }
+    }
+
+    const result = await state.socket.command<{ subject: string; body: string }>({
+      type: "chat.generateCommitMessage",
+      chatId: state.activeChatId,
+      paths: args.paths,
+    })
+
+    return {
+      subject: result.subject,
+      body: result.body,
+    }
+  }, [state.activeChatId, state.socket])
+
   function hasDraggedFiles(event: React.DragEvent) {
     return hasFileDragTypes(event.dataTransfer?.types ?? [])
   }
@@ -771,10 +802,13 @@ export function ChatPage() {
               } as CSSProperties}
             >
               <RightSidebar
+                chatId={state.activeChatId}
                 diffs={state.chatDiffSnapshot ?? { status: "unknown", files: [] }}
                 diffRenderMode={diffRenderMode}
                 wrapLines={wrapDiffLines}
                 onOpenFile={handleOpenDiffFile}
+                onGenerateCommitMessage={handleGenerateCommitMessage}
+                onCommit={handleCommitDiffs}
                 onDiffRenderModeChange={setDiffRenderMode}
                 onWrapLinesChange={setWrapDiffLines}
                 onClose={() => toggleRightSidebar(projectId)}

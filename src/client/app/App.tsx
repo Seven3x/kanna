@@ -3,9 +3,9 @@ import { Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } 
 import { AppDialogProvider } from "../components/ui/app-dialog"
 import { TooltipProvider } from "../components/ui/tooltip"
 import { APP_NAME, SDK_CLIENT_APP } from "../../shared/branding"
-import type { SidebarData } from "../../shared/types"
 import { useChatSoundPreferencesStore } from "../stores/chatSoundPreferencesStore"
 import { playChatNotificationSound, shouldPlayChatSound } from "../lib/chatSounds"
+import { getChatSoundBurstCount, getNotificationTitleCount } from "./chatNotifications"
 import { KannaSidebar } from "./KannaSidebar"
 import { ChatPage } from "./ChatPage"
 import { LocalProjectsPage } from "./LocalProjectsPage"
@@ -18,52 +18,6 @@ export function shouldRedirectToChangelog(pathname: string, currentVersion: stri
   return pathname === "/" && Boolean(currentVersion) && seenVersion !== currentVersion
 }
 
-export function getNotificationTitleCount(sidebarData: SidebarData) {
-  return sidebarData.projectGroups.reduce((count, group) => (
-    count + group.chats.reduce((chatCount, chat) => (
-      chatCount + (chat.unread ? 1 : 0) + (chat.status === "waiting_for_user" ? 1 : 0)
-    ), 0)
-  ), 0)
-}
-
-interface ChatNotificationSnapshot {
-  unreadCount: number
-  waitingChatIds: Set<string>
-}
-
-export function getChatNotificationSnapshot(sidebarData: SidebarData): ChatNotificationSnapshot {
-  let unreadCount = 0
-  const waitingChatIds = new Set<string>()
-
-  for (const group of sidebarData.projectGroups) {
-    for (const chat of group.chats) {
-      if (chat.unread) unreadCount += 1
-      if (chat.status === "waiting_for_user") {
-        waitingChatIds.add(chat.chatId)
-      }
-    }
-  }
-
-  return { unreadCount, waitingChatIds }
-}
-
-export function getChatSoundBurstCount(previous: SidebarData | null, next: SidebarData): number {
-  if (!previous) return 0
-
-  const previousSnapshot = getChatNotificationSnapshot(previous)
-  const nextSnapshot = getChatNotificationSnapshot(next)
-
-  const unreadIncrease = Math.max(0, nextSnapshot.unreadCount - previousSnapshot.unreadCount)
-  let newWaitingChats = 0
-  for (const chatId of nextSnapshot.waitingChatIds) {
-    if (!previousSnapshot.waitingChatIds.has(chatId)) {
-      newWaitingChats += 1
-    }
-  }
-
-  return unreadIncrease + newWaitingChats
-}
-
 function KannaLayout() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -73,7 +27,7 @@ function KannaLayout() {
   const chatSoundId = useChatSoundPreferencesStore((store) => store.chatSoundId)
   const showMobileOpenButton = location.pathname === "/"
   const currentVersion = SDK_CLIENT_APP.split("/")[1] ?? "unknown"
-  const previousSidebarDataRef = useRef<SidebarData | null>(null)
+  const previousSidebarDataRef = useRef<ReturnType<typeof useKannaState>["sidebarData"] | null>(null)
 
   useEffect(() => {
     const seenVersion = window.localStorage.getItem(VERSION_SEEN_STORAGE_KEY)

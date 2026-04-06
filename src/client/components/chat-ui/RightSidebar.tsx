@@ -1,17 +1,25 @@
 import { PatchDiff } from "@pierre/diffs/react"
-import { ChevronDown, ChevronUp, Columns2, ExternalLink, Rows3, WrapText, X } from "lucide-react"
-import { memo, useEffect, useState, type ReactNode } from "react"
+import { Check, ChevronDown, ChevronUp, Columns2, ExternalLink, Rows3, WrapText, X } from "lucide-react"
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react"
 import type { ChatDiffSnapshot } from "../../../shared/types"
 import { cn } from "../../lib/utils"
+import { useDiffCommitStore } from "../../stores/diffCommitStore"
+import { Button } from "../ui/button"
+import { Input } from "../ui/input"
+import { Textarea } from "../ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 
 type DiffRenderMode = "unified" | "split"
+const EMPTY_CHECKED_PATHS: Record<string, boolean> = {}
 
 interface RightSidebarProps {
+  chatId: string | null
   diffs: ChatDiffSnapshot
   diffRenderMode: DiffRenderMode
   wrapLines: boolean
   onOpenFile: (path: string) => void
+  onGenerateCommitMessage: (args: { paths: string[] }) => Promise<{ subject: string; body: string }>
+  onCommit: (args: { paths: string[]; summary: string; description: string }) => Promise<void>
   onDiffRenderModeChange: (mode: DiffRenderMode) => void
   onWrapLinesChange: (wrap: boolean) => void
   onClose: () => void
@@ -64,11 +72,42 @@ function IconButton(props: {
   )
 }
 
+function StageCheckbox({
+  checked,
+  onClick,
+}: {
+  checked: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={checked ? "Exclude file from commit" : "Include file in commit"}
+      aria-pressed={checked}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      className={cn(
+        "flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded border transition-colors",
+        checked
+          ? "border-foreground bg-foreground text-background"
+          : "border-muted-foreground/50 bg-background text-transparent"
+      )}
+    >
+      {checked ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
+    </button>
+  )
+}
+
 function RightSidebarImpl({
+  chatId,
   diffs,
   diffRenderMode,
   wrapLines,
   onOpenFile,
+  onGenerateCommitMessage,
+  onCommit,
   onDiffRenderModeChange,
   onWrapLinesChange,
   onClose,
@@ -76,16 +115,92 @@ function RightSidebarImpl({
   const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(diffs.files.map((file) => [file.path, true]))
   )
+  const [summary, setSummary] = useState("")
+  const [description, setDescription] = useState("")
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [isCommitting, setIsCommitting] = useState(false)
+  const filePaths = useMemo(() => diffs.files.map((file) => file.path), [diffs.files])
+  const filePathsKey = useMemo(() => filePaths.join("\u0000"), [filePaths])
+  const checkedPaths = useDiffCommitStore((store) => (chatId ? (store.checkedPathsByChatId[chatId] ?? EMPTY_CHECKED_PATHS) : EMPTY_CHECKED_PATHS))
+  const reconcileCheckedPaths = useDiffCommitStore((store) => store.reconcileChat)
+  const setCheckedPath = useDiffCommitStore((store) => store.setChecked)
 
   useEffect(() => {
     setCollapsedPaths((current) => {
       const next: Record<string, boolean> = {}
-      for (const file of diffs.files) {
-        next[file.path] = current[file.path] ?? true
+      for (const filePath of filePaths) {
+        next[filePath] = current[filePath] ?? true
+      }
+      if (
+        Object.keys(current).length === Object.keys(next).length
+        && Object.entries(next).every(([path, value]) => current[path] === value)
+      ) {
+        return current
       }
       return next
     })
-  }, [diffs.files])
+  }, [filePaths, filePathsKey])
+
+  useEffect(() => {
+    if (!chatId) return
+    reconcileCheckedPaths(chatId, filePaths)
+  }, [chatId, filePaths, filePathsKey, reconcileCheckedPaths])
+
+  const selectedPaths = useMemo(
+    () => diffs.files.filter((file) => checkedPaths[file.path] ?? true).map((file) => file.path),
+    [checkedPaths, diffs.files]
+  )
+  const selectedCount = selectedPaths.length
+  const trimmedSummary = summary.trim()
+  const hasSummary = trimmedSummary.length > 0
+  const isBusy = isGenerating || isCommitting
+  const canGenerate = diffs.status === "ready"
+    && selectedCount > 0
+    && !isBusy
+  const canCommit = diffs.status === "ready"
+    && selectedCount > 0
+    && hasSummary
+    && !isBusy
+
+  async function handleCommit() {
+    if (!canCommit) return
+    setIsCommitting(true)
+    try {
+      await onCommit({
+        paths: selectedPaths,
+        summary: trimmedSummary,
+        description: description.trim(),
+      })
+      setSummary("")
+      setDescription("")
+    } finally {
+      setIsCommitting(false)
+    }
+  }
+
+  async function handleGenerate() {
+    if (!canGenerate) return
+    setIsGenerating(true)
+    try {
+      const result = await onGenerateCommitMessage({ paths: selectedPaths })
+      setSummary(result.subject)
+      setDescription(result.body)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  function handleCommitKeyDown(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") {
+      return
+    }
+    event.preventDefault()
+    if (hasSummary) {
+      void handleCommit()
+      return
+    }
+    void handleGenerate()
+  }
 
   return (
     <div className="h-full min-h-0 border-l border-border bg-background md:min-w-[300px]">
@@ -137,10 +252,11 @@ function RightSidebarImpl({
               <p className="text-sm text-muted-foreground">No file changes.</p>
             </div>
           ) : (
-            <div className="p-1.5 pr-0 space-y-1.5">
+            <div className="p-1.5 pr-0 pb-40 space-y-1.5">
               {diffs.files.map((file) => {
                 const counts = getPatchCounts(file.patch)
                 const isCollapsed = collapsedPaths[file.path] ?? true
+                const isChecked = checkedPaths[file.path] ?? true
 
                 return (
                 <div key={file.path} className="overflow-hidden rounded-lg border border-border">
@@ -158,8 +274,15 @@ function RightSidebarImpl({
                       !isCollapsed && "border-b border-border/50"
                     )}
                   >
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <div className="min-w-0 truncate">{file.path}</div>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <StageCheckbox
+                        checked={isChecked}
+                        onClick={() => {
+                          if (!chatId) return
+                          setCheckedPath(chatId, file.path, !isChecked)
+                        }}
+                      />
+                      <div className="min-w-0 truncate  select-none">{file.path}</div>
                       <button
                         type="button"
                         aria-label={`Open ${file.path} in editor`}
@@ -173,7 +296,7 @@ function RightSidebarImpl({
                         <ExternalLink className="h-3 w-3 shrink-0" />
                       </button>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2 select-none">
                       <span className="whitespace-nowrap font-mono">
                         {counts.additions > 0 ? <span className="text-green-600 dark:text-green-400">+{counts.additions}</span> : null}
                         {counts.deletions > 0 ? (
@@ -204,6 +327,51 @@ function RightSidebarImpl({
               })}
             </div>
           )}
+        </div>
+        <div className="shrink-0 bg-background/95 p-1.5 pt-0 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+          <div className="space-y-3">
+            <div className="space-y-0">
+              <Input
+                value={summary}
+                onChange={(event) => {
+                  setSummary(event.target.value)
+                }}
+                onKeyDown={handleCommitKeyDown}
+                placeholder="Your commit message (override)"
+                className="rounded-b-none"
+                disabled={isBusy || diffs.status !== "ready"}
+              />
+              <Textarea
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                onKeyDown={handleCommitKeyDown}
+                placeholder="Description"
+                rows={3}
+                className="-mt-px rounded-t-none rounded-b-none outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:border-border"
+                disabled={isBusy || diffs.status !== "ready"}
+              />
+              <Button
+                type="button"
+                className="-mt-px w-full rounded-t-none rounded-b-xl"
+                disabled={hasSummary ? !canCommit : !canGenerate}
+                onClick={() => {
+                  if (hasSummary) {
+                    void handleCommit()
+                    return
+                  }
+                  void handleGenerate()
+                }}
+              >
+                {hasSummary
+                  ? (isCommitting
+                    ? "Committing..."
+                    : `Commit ${selectedCount} ${selectedCount === 1 ? "file" : "files"} to ${diffs.branchName ?? "current branch"}`)
+                  : (isGenerating
+                    ? "Generating..."
+                    : `Generate commit for ${selectedCount} ${selectedCount === 1 ? "file" : "files"} on ${diffs.branchName ?? "current branch"}`)}
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -68,7 +68,40 @@ describe("DiffStore", () => {
 
     expect(store.getSnapshot("chat-1")).toEqual({
       status: "no_repo",
+      branchName: undefined,
       files: [],
     })
+  })
+
+  test("commits only the selected files and refreshes the snapshot", async () => {
+    const repoRoot = await createRepo()
+    tempDirs.push(repoRoot)
+    await writeFile(path.join(repoRoot, "app.txt"), "base\n", "utf8")
+    await writeFile(path.join(repoRoot, "notes.txt"), "keep\n", "utf8")
+    await run(["git", "add", "."], repoRoot)
+    await run(["git", "commit", "-m", "init"], repoRoot)
+
+    await writeFile(path.join(repoRoot, "app.txt"), "changed\n", "utf8")
+    await writeFile(path.join(repoRoot, "notes.txt"), "changed too\n", "utf8")
+
+    const store = new DiffStore(repoRoot)
+    await store.initialize()
+    await store.refreshSnapshot("chat-1", repoRoot)
+
+    await store.commitFiles({
+      chatId: "chat-1",
+      projectPath: repoRoot,
+      paths: ["app.txt"],
+      summary: "Update app",
+      description: "Only app changes",
+    })
+
+    const snapshot = store.getSnapshot("chat-1")
+    expect(snapshot.status).toBe("ready")
+    expect(snapshot.files).toHaveLength(1)
+    expect(snapshot.files[0]?.path).toBe("notes.txt")
+
+    const lastMessage = (await run(["git", "log", "-1", "--pretty=%B"], repoRoot)).trim()
+    expect(lastMessage).toBe("Update app\n\nOnly app changes")
   })
 })

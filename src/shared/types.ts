@@ -476,6 +476,7 @@ export interface ChatDiffFile {
 
 export interface ChatDiffSnapshot {
   status: "unknown" | "ready" | "no_repo"
+  branchName?: string
   files: ChatDiffFile[]
 }
 

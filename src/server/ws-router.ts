@@ -19,7 +19,7 @@ export interface ClientState {
 
 interface CreateWsRouterArgs {
   store: EventStore
-  diffStore?: Pick<DiffStore, "getSnapshot" | "refreshSnapshot">
+  diffStore?: Pick<DiffStore, "getSnapshot" | "refreshSnapshot" | "generateCommitMessage" | "commitFiles">
   agent: AgentCoordinator
   terminals: TerminalManager
   keybindings: KeybindingsManager
@@ -46,8 +46,10 @@ export function createWsRouter({
 }: CreateWsRouterArgs) {
   const sockets = new Set<ServerWebSocket<ClientState>>()
   const resolvedDiffStore = diffStore ?? {
-    getSnapshot: () => ({ status: "unknown", files: [] as const }),
+    getSnapshot: () => ({ status: "unknown", branchName: undefined, files: [] as const }),
     refreshSnapshot: async () => false,
+    generateCommitMessage: async () => ({ subject: "Update selected files", body: "", usedFallback: true, failureMessage: null }),
+    commitFiles: async () => false,
   }
 
   function createEnvelope(id: string, topic: SubscriptionTopic): ServerEnvelope {
@@ -323,6 +325,44 @@ export function createWsRouter({
             throw new Error("Project not found")
           }
           const changed = await resolvedDiffStore.refreshSnapshot(command.chatId, project.localPath)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
+          if (changed) {
+            broadcastSnapshots()
+          }
+          return
+        }
+        case "chat.generateCommitMessage": {
+          const chat = store.getChat(command.chatId)
+          if (!chat) {
+            throw new Error("Chat not found")
+          }
+          const project = store.getProject(chat.projectId)
+          if (!project) {
+            throw new Error("Project not found")
+          }
+          const result = await resolvedDiffStore.generateCommitMessage({
+            projectPath: project.localPath,
+            paths: command.paths,
+          })
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result })
+          return
+        }
+        case "chat.commitDiffs": {
+          const chat = store.getChat(command.chatId)
+          if (!chat) {
+            throw new Error("Chat not found")
+          }
+          const project = store.getProject(chat.projectId)
+          if (!project) {
+            throw new Error("Project not found")
+          }
+          const changed = await resolvedDiffStore.commitFiles({
+            chatId: command.chatId,
+            projectPath: project.localPath,
+            paths: command.paths,
+            summary: command.summary,
+            description: command.description,
+          })
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
           if (changed) {
             broadcastSnapshots()

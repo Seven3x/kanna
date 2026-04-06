@@ -2,15 +2,18 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import type { ChatDiffFile, ChatDiffSnapshot } from "../shared/types"
+import { generateCommitMessageDetailed } from "./generate-commit-message"
 
 interface StoredChatDiffState {
   status: ChatDiffSnapshot["status"]
+  branchName?: string
   files: ChatDiffFile[]
 }
 
 function createEmptyState(): StoredChatDiffState {
   return {
     status: "unknown",
+    branchName: undefined,
     files: [],
   }
 }
@@ -20,6 +23,7 @@ function snapshotsEqual(left: StoredChatDiffState | undefined, right: StoredChat
     return right.status === "unknown" && right.files.length === 0
   }
   if (left.status !== right.status) return false
+  if (left.branchName !== right.branchName) return false
   if (left.files.length !== right.files.length) return false
   return left.files.every((file, index) => {
     const other = right.files[index]
@@ -69,6 +73,20 @@ async function resolveRepo(projectPath: string): Promise<{ repoRoot: string; bas
     repoRoot,
     baseCommit: head.exitCode === 0 ? head.stdout.trim() : null,
   }
+}
+
+async function getBranchName(repoRoot: string) {
+  const symbolicRef = await runGit(["symbolic-ref", "--quiet", "--short", "HEAD"], repoRoot)
+  if (symbolicRef.exitCode === 0) {
+    return symbolicRef.stdout.trim()
+  }
+
+  const revParse = await runGit(["rev-parse", "--abbrev-ref", "HEAD"], repoRoot)
+  if (revParse.exitCode === 0) {
+    return revParse.stdout.trim()
+  }
+
+  return undefined
 }
 
 function parseStatusPaths(output: string) {
@@ -182,6 +200,14 @@ async function computeCurrentFiles(repoRoot: string, baseCommit: string | null):
   return files
 }
 
+function normalizeRepoRelativePath(inputPath: string) {
+  const normalized = path.posix.normalize(inputPath.replaceAll("\\", "/")).replace(/^\.\/+/u, "")
+  if (!normalized || normalized === "." || normalized.startsWith("../") || normalized.includes("/../") || path.posix.isAbsolute(normalized)) {
+    throw new Error(`Invalid diff path: ${inputPath}`)
+  }
+  return normalized
+}
+
 export class DiffStore {
   private readonly states = new Map<string, StoredChatDiffState>()
 
@@ -193,6 +219,7 @@ export class DiffStore {
     const state = this.states.get(chatId) ?? createEmptyState()
     return {
       status: state.status,
+      branchName: state.branchName,
       files: [...state.files],
     }
   }
@@ -202,6 +229,7 @@ export class DiffStore {
     if (!repo) {
       const nextState = {
         status: "no_repo",
+        branchName: undefined,
         files: [],
       } satisfies StoredChatDiffState
       const changed = !snapshotsEqual(this.states.get(chatId), nextState)
@@ -210,12 +238,93 @@ export class DiffStore {
     }
 
     const files = await computeCurrentFiles(repo.repoRoot, repo.baseCommit)
+    const branchName = await getBranchName(repo.repoRoot)
     const nextState = {
       status: "ready",
+      branchName,
       files,
     } satisfies StoredChatDiffState
     const changed = !snapshotsEqual(this.states.get(chatId), nextState)
     this.states.set(chatId, nextState)
     return changed
+  }
+
+  async generateCommitMessage(args: {
+    projectPath: string
+    paths: string[]
+  }) {
+    const normalizedPaths = [...new Set(args.paths.map(normalizeRepoRelativePath))]
+    if (normalizedPaths.length === 0) {
+      throw new Error("Select at least one file")
+    }
+
+    const repo = await resolveRepo(args.projectPath)
+    if (!repo) {
+      throw new Error("Project is not in a git repository")
+    }
+
+    const files = await computeCurrentFiles(repo.repoRoot, repo.baseCommit)
+    const selectedFiles = normalizedPaths.map((selectedPath) => {
+      const file = files.find((candidate) => candidate.path === selectedPath)
+      if (!file) {
+        throw new Error(`File is no longer changed: ${selectedPath}`)
+      }
+      return file
+    })
+
+    const branchName = await getBranchName(repo.repoRoot)
+    return await generateCommitMessageDetailed({
+      cwd: repo.repoRoot,
+      branchName,
+      files: selectedFiles,
+    })
+  }
+
+  async commitFiles(args: {
+    chatId: string
+    projectPath: string
+    paths: string[]
+    summary: string
+    description?: string
+  }) {
+    const summary = args.summary.trim()
+    const description = args.description?.trim()
+    if (!summary) {
+      throw new Error("Commit summary is required")
+    }
+
+    const normalizedPaths = [...new Set(args.paths.map(normalizeRepoRelativePath))]
+    if (normalizedPaths.length === 0) {
+      throw new Error("Select at least one file to commit")
+    }
+
+    const repo = await resolveRepo(args.projectPath)
+    if (!repo) {
+      throw new Error("Project is not in a git repository")
+    }
+
+    const currentDirtyPaths = new Set(await listDirtyPaths(repo.repoRoot))
+    const missingPaths = normalizedPaths.filter((relativePath) => !currentDirtyPaths.has(relativePath))
+    if (missingPaths.length > 0) {
+      throw new Error(`File is no longer changed: ${missingPaths[0]}`)
+    }
+
+    const addResult = await runGit(["add", "--", ...normalizedPaths], repo.repoRoot)
+    if (addResult.exitCode !== 0) {
+      throw new Error(addResult.stderr.trim() || "Failed to stage selected files")
+    }
+
+    const commitArgs = ["commit", "--only", "-m", summary]
+    if (description) {
+      commitArgs.push("-m", description)
+    }
+    commitArgs.push("--", ...normalizedPaths)
+
+    const commitResult = await runGit(commitArgs, repo.repoRoot)
+    if (commitResult.exitCode !== 0) {
+      throw new Error(commitResult.stderr.trim() || commitResult.stdout.trim() || "Failed to commit selected files")
+    }
+
+    return await this.refreshSnapshot(args.chatId, args.projectPath)
   }
 }

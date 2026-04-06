@@ -76,6 +76,8 @@ export type ClientCommand =
       planMode?: boolean
     }
   | { type: "chat.refreshDiffs"; chatId: string }
+  | { type: "chat.generateCommitMessage"; chatId: string; paths: string[] }
+  | { type: "chat.commitDiffs"; chatId: string; paths: string[]; summary: string; description?: string }
   | { type: "chat.cancel"; chatId: string }
   | { type: "chat.stopDraining"; chatId: string }
   | { type: "chat.respondTool"; chatId: string; toolUseId: string; result: unknown }
