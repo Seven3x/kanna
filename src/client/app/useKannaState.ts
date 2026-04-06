@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
 import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type KeybindingsSnapshot, type ModelOptions, type ProjectSkillSummary, type ProviderCatalogEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
@@ -427,6 +427,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     () => getActiveChatSnapshot(chatSnapshot, activeChatId),
     [activeChatId, chatSnapshot]
   )
+  const deferredTranscriptEntries = useDeferredValue(activeChatSnapshot?.messages ?? [])
   useEffect(() => {
     logKannaState("active snapshot resolved", {
       routeChatId: activeChatId,
@@ -437,7 +438,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
       pendingChatId,
     })
   }, [activeChatId, activeChatSnapshot, chatSnapshot, pendingChatId])
-  const messages = useMemo(() => processTranscriptMessages(activeChatSnapshot?.messages ?? []), [activeChatSnapshot?.messages])
+  const messages = useMemo(() => processTranscriptMessages(deferredTranscriptEntries), [deferredTranscriptEntries])
   const latestToolIds = useMemo(() => getLatestToolIds(messages), [messages])
   const runtime = activeChatSnapshot?.runtime ?? null
   const availableProviders = activeChatSnapshot?.availableProviders ?? PROVIDERS

@@ -1,4 +1,4 @@
-import React, { useMemo } from "react"
+import React, { useEffect, useMemo, useState } from "react"
 import type { AskUserQuestionItem, ProcessedToolCall } from "./types"
 import type { AskUserQuestionAnswerMap, HydratedTranscriptMessage, ProjectSkillSummary } from "../../../shared/types"
 import { getLatestToolIds } from "../../app/derived"
@@ -85,6 +85,9 @@ const EMPTY_LATEST_TOOL_IDS = {
   TodoWrite: null,
 } as const
 
+const INITIAL_RENDER_ITEM_LIMIT = 160
+const RENDER_ITEM_PAGE_SIZE = 120
+
 export function TranscriptMessageList({
   messages,
   isLoading,
@@ -100,10 +103,22 @@ export function TranscriptMessageList({
   selectionZoneAttribute,
 }: TranscriptMessageListProps) {
   const renderItems = useMemo(() => groupMessages(messages), [messages])
+  const [visibleStartIndex, setVisibleStartIndex] = useState(() => Math.max(0, renderItems.length - INITIAL_RENDER_ITEM_LIMIT))
   const resolvedLatestToolIds = useMemo(
     () => latestToolIds ?? (readOnly ? EMPTY_LATEST_TOOL_IDS : getLatestToolIds(messages)),
     [latestToolIds, messages, readOnly]
   )
+
+  useEffect(() => {
+    setVisibleStartIndex(Math.max(0, renderItems.length - INITIAL_RENDER_ITEM_LIMIT))
+  }, [renderItems.length])
+
+  const hiddenItemCount = visibleStartIndex
+  const visibleItems = useMemo(
+    () => renderItems.slice(visibleStartIndex),
+    [renderItems, visibleStartIndex]
+  )
+
   function renderMessage(message: HydratedTranscriptMessage, index: number): React.ReactNode {
     if (message.kind === "user_prompt") {
       return <UserMessage key={message.id} content={message.content} attachments={message.attachments} skills={skills} />
@@ -180,7 +195,18 @@ export function TranscriptMessageList({
 
   return (
     <>
-      {renderItems.map((item) => {
+      {hiddenItemCount > 0 ? (
+        <div className="pb-4">
+          <button
+            type="button"
+            onClick={() => setVisibleStartIndex((current) => Math.max(0, current - RENDER_ITEM_PAGE_SIZE))}
+            className="w-full rounded-xl border border-border/70 bg-muted/25 px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          >
+            {`Show ${Math.min(RENDER_ITEM_PAGE_SIZE, hiddenItemCount)} earlier messages (${hiddenItemCount} hidden)`}
+          </button>
+        </div>
+      ) : null}
+      {visibleItems.map((item) => {
         const selectionProps = selectionZoneAttribute ? { [selectionZoneAttribute]: "" } : {}
 
         if (item.type === "tool-group") {
