@@ -118,7 +118,6 @@ export function ChatPage() {
   const [isEmptyStateTypingComplete, setIsEmptyStateTypingComplete] = useState(false)
   const [fixedTerminalHeight, setFixedTerminalHeight] = useState(0)
   const [isPageFileDragActive, setIsPageFileDragActive] = useState(false)
-  const [layoutWidth, setLayoutWidth] = useState(0)
   const [chatAreaWidth, setChatAreaWidth] = useState(0)
   const [diffRenderMode, setDiffRenderMode] = useState<"unified" | "split">("unified")
   const [wrapDiffLines, setWrapDiffLines] = useState(false)
@@ -474,8 +473,6 @@ export function ChatPage() {
 
     const updateHeight = () => {
       const containerHeight = element.getBoundingClientRect().height
-      const containerWidth = element.getBoundingClientRect().width
-      setLayoutWidth((current) => (Math.abs(current - containerWidth) < 1 ? current : containerWidth))
 
       if (!shouldRenderTerminalLayout) {
         return

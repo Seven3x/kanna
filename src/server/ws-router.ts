@@ -155,6 +155,7 @@ export function createWsRouter({
     const snapshotSignatures = ensureSnapshotSignatures(ws)
     for (const [id, topic] of ws.data.subscriptions.entries()) {
       const envelope = createEnvelope(id, topic)
+      if (envelope.type !== "snapshot") continue
       const signature = JSON.stringify(envelope.snapshot)
       if (snapshotSignatures.get(id) === signature) {
         continue
@@ -186,6 +187,7 @@ export function createWsRouter({
       for (const [id, topic] of ws.data.subscriptions.entries()) {
         if (topic.type !== "terminal" || topic.terminalId !== terminalId) continue
         const envelope = createEnvelope(id, topic)
+        if (envelope.type !== "snapshot") continue
         const signature = JSON.stringify(envelope.snapshot)
         if (snapshotSignatures.get(id) === signature) continue
         snapshotSignatures.set(id, signature)
@@ -218,6 +220,7 @@ export function createWsRouter({
       for (const [id, topic] of ws.data.subscriptions.entries()) {
         if (topic.type !== "keybindings") continue
         const envelope = createEnvelope(id, topic)
+        if (envelope.type !== "snapshot") continue
         const signature = JSON.stringify(envelope.snapshot)
         if (snapshotSignatures.get(id) === signature) continue
         snapshotSignatures.set(id, signature)
@@ -232,6 +235,7 @@ export function createWsRouter({
       for (const [id, topic] of ws.data.subscriptions.entries()) {
         if (topic.type !== "update") continue
         const envelope = createEnvelope(id, topic)
+        if (envelope.type !== "snapshot") continue
         const signature = JSON.stringify(envelope.snapshot)
         if (snapshotSignatures.get(id) === signature) continue
         snapshotSignatures.set(id, signature)

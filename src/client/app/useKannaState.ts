@@ -678,7 +678,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     enableAutoFollow("smooth")
   }, [enableAutoFollow])
 
-  async function createChatForProject(projectId: string) {
+  const createChatForProject = useCallback(async (projectId: string) => {
     const chatPreferences = useChatPreferencesStore.getState()
     const sourceComposerState = activeChatId
       ? chatPreferences.getComposerState(activeChatId)
@@ -690,9 +690,9 @@ export function useKannaState(activeChatId: string | null): KannaState {
     navigate(`/chat/${result.chatId}`)
     setSidebarOpen(false)
     setCommandError(null)
-  }
+  }, [activeChatId, navigate, socket])
 
-  async function resolveProjectIdForStartChat(intent: StartChatIntent): Promise<{ projectId: string; localPath?: string }> {
+  const resolveProjectIdForStartChat = useCallback(async (intent: StartChatIntent): Promise<{ projectId: string; localPath?: string }> => {
     if (intent.kind === "project_id") {
       return { projectId: intent.projectId }
     }
@@ -708,9 +708,9 @@ export function useKannaState(activeChatId: string | null): KannaState {
         : { type: "project.open", localPath: intent.project.localPath }
     )
     return { projectId: result.projectId, localPath: intent.project.localPath }
-  }
+  }, [socket])
 
-  async function startChatFromIntent(intent: StartChatIntent) {
+  const startChatFromIntent = useCallback(async (intent: StartChatIntent) => {
     try {
       const localPath = intent.kind === "project_id"
         ? null
@@ -728,30 +728,30 @@ export function useKannaState(activeChatId: string | null): KannaState {
     } finally {
       setStartingLocalPath(null)
     }
-  }
+  }, [createChatForProject, resolveProjectIdForStartChat])
 
-  async function handleCreateChat(projectId: string) {
+  const handleCreateChat = useCallback(async (projectId: string) => {
     await startChatFromIntent({ kind: "project_id", projectId })
-  }
+  }, [startChatFromIntent])
 
-  async function handleOpenLocalProject(localPath: string) {
+  const handleOpenLocalProject = useCallback(async (localPath: string) => {
     await startChatFromIntent({ kind: "local_path", localPath })
-  }
+  }, [startChatFromIntent])
 
-  async function handleCreateProject(project: ProjectRequest) {
+  const handleCreateProject = useCallback(async (project: ProjectRequest) => {
     await startChatFromIntent({ kind: "project_request", project })
-  }
+  }, [startChatFromIntent])
 
-  async function handleCheckForUpdates(options?: { force?: boolean }) {
+  const handleCheckForUpdates = useCallback(async (options?: { force?: boolean }) => {
     try {
       await socket.command<UpdateSnapshot>({ type: "update.check", force: options?.force })
       setCommandError(null)
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
     }
-  }
+  }, [socket])
 
-  async function handleInstallUpdate() {
+  const handleInstallUpdate = useCallback(async () => {
     try {
       const result = await socket.command<UpdateInstallResult>({ type: "update.install" })
       if (!result.ok) {
@@ -778,7 +778,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
       clearUiUpdateRestartPhase()
       setCommandError(error instanceof Error ? error.message : String(error))
     }
-  }
+  }, [dialog, socket])
 
   async function handleSend(
     content: string,
@@ -829,14 +829,14 @@ export function useKannaState(activeChatId: string | null): KannaState {
     }
   }
 
-  async function handleCancel() {
+  const handleCancel = useCallback(async () => {
     if (!activeChatId) return
     try {
       await socket.command({ type: "chat.cancel", chatId: activeChatId })
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
     }
-  }
+  }, [activeChatId, socket])
 
   const handleStopDraining = useCallback(async () => {
     if (!activeChatId) return
@@ -847,7 +847,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     }
   }, [activeChatId, socket])
 
-  async function handleDeleteChat(chat: SidebarChatRow) {
+  const handleDeleteChat = useCallback(async (chat: SidebarChatRow) => {
     const confirmed = await dialog.confirm({
       title: "Delete Chat",
       description: `Delete "${chat.title}"? This cannot be undone.`,
@@ -864,9 +864,9 @@ export function useKannaState(activeChatId: string | null): KannaState {
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
     }
-  }
+  }, [activeChatId, dialog, navigate, sidebarData.projectGroups, socket])
 
-  async function handleRemoveProject(projectId: string) {
+  const handleRemoveProject = useCallback(async (projectId: string) => {
     const project = sidebarData.projectGroups.find((group) => group.groupKey === projectId)
     if (!project) return
     const projectName = project.localPath.split("/").filter(Boolean).pop() ?? project.localPath
@@ -889,56 +889,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
     }
-  }
-
-  async function handleOpenExternal(action: "open_finder" | "open_terminal" | "open_editor") {
-    const localPath = runtime?.localPath ?? localProjects?.projects[0]?.localPath ?? sidebarData.projectGroups[0]?.localPath
-    if (!localPath) return
-    try {
-      await openExternal({
-        action,
-        localPath,
-      })
-    } catch (error) {
-      setCommandError(error instanceof Error ? error.message : String(error))
-    }
-  }
-
-  async function handleCopyPath(localPath: string) {
-    try {
-      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-        throw new Error("Clipboard is not available")
-      }
-      await navigator.clipboard.writeText(localPath)
-      setCommandError(null)
-    } catch (error) {
-      setCommandError(error instanceof Error ? error.message : String(error))
-    }
-  }
-
-  const handleOpenLocalLink = useCallback(async (target: { path: string; line?: number; column?: number }) => {
-    try {
-      await openExternal({
-        action: "open_editor",
-        localPath: target.path,
-        line: target.line,
-        column: target.column,
-      })
-    } catch (error) {
-      setCommandError(error instanceof Error ? error.message : String(error))
-    }
-  }, [])
-
-  async function handleOpenExternalPath(action: "open_finder" | "open_editor", localPath: string) {
-    try {
-      await openExternal({
-        action,
-        localPath,
-      })
-    } catch (error) {
-      setCommandError(error instanceof Error ? error.message : String(error))
-    }
-  }
+  }, [dialog, navigate, runtime?.projectId, sidebarData.projectGroups, socket])
 
   const openExternal = useCallback(async (command: {
     action: "open_finder" | "open_terminal" | "open_editor"
@@ -960,7 +911,56 @@ export function useKannaState(activeChatId: string | null): KannaState {
     })
   }, [socket])
 
-  function handleCompose() {
+  const handleOpenExternal = useCallback(async (action: "open_finder" | "open_terminal" | "open_editor") => {
+    const localPath = runtime?.localPath ?? localProjects?.projects[0]?.localPath ?? sidebarData.projectGroups[0]?.localPath
+    if (!localPath) return
+    try {
+      await openExternal({
+        action,
+        localPath,
+      })
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    }
+  }, [localProjects?.projects, openExternal, runtime?.localPath, sidebarData.projectGroups])
+
+  const handleCopyPath = useCallback(async (localPath: string) => {
+    try {
+      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+        throw new Error("Clipboard is not available")
+      }
+      await navigator.clipboard.writeText(localPath)
+      setCommandError(null)
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    }
+  }, [])
+
+  const handleOpenLocalLink = useCallback(async (target: { path: string; line?: number; column?: number }) => {
+    try {
+      await openExternal({
+        action: "open_editor",
+        localPath: target.path,
+        line: target.line,
+        column: target.column,
+      })
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    }
+  }, [openExternal])
+
+  const handleOpenExternalPath = useCallback(async (action: "open_finder" | "open_editor", localPath: string) => {
+    try {
+      await openExternal({
+        action,
+        localPath,
+      })
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    }
+  }, [openExternal])
+
+  const handleCompose = useCallback(() => {
     const intent = resolveComposeIntent({
       selectedProjectId,
       sidebarProjectId: sidebarData.projectGroups[0]?.groupKey,
@@ -972,7 +972,12 @@ export function useKannaState(activeChatId: string | null): KannaState {
     }
 
     navigate("/")
-  }
+  }, [fallbackLocalProjectPath, navigate, selectedProjectId, sidebarData.projectGroups, startChatFromIntent])
+
+  const openSidebar = useCallback(() => setSidebarOpen(true), [])
+  const closeSidebar = useCallback(() => setSidebarOpen(false), [])
+  const collapseSidebar = useCallback(() => setSidebarCollapsed(true), [])
+  const expandSidebar = useCallback(() => setSidebarCollapsed(false), [])
 
   const handleAskUserQuestion = useCallback(async (
     toolUseId: string,
@@ -1044,10 +1049,10 @@ export function useKannaState(activeChatId: string | null): KannaState {
     navbarLocalPath,
     editorLabel,
     hasSelectedProject,
-    openSidebar: () => setSidebarOpen(true),
-    closeSidebar: () => setSidebarOpen(false),
-    collapseSidebar: () => setSidebarCollapsed(true),
-    expandSidebar: () => setSidebarCollapsed(false),
+    openSidebar,
+    closeSidebar,
+    collapseSidebar,
+    expandSidebar,
     updateScrollState,
     scrollToBottom,
     handleCreateChat,

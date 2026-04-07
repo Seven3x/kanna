@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react"
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom"
 import { AppDialogProvider } from "../components/ui/app-dialog"
 import { TooltipProvider } from "../components/ui/tooltip"
@@ -28,6 +28,67 @@ function KannaLayout() {
   const showMobileOpenButton = location.pathname === "/"
   const currentVersion = SDK_CLIENT_APP.split("/")[1] ?? "unknown"
   const previousSidebarDataRef = useRef<ReturnType<typeof useKannaState>["sidebarData"] | null>(null)
+  const handleSidebarCreateChat = useCallback((projectId: string) => {
+    void state.handleCreateChat(projectId)
+  }, [state.handleCreateChat])
+  const handleSidebarDeleteChat = useCallback((chat: Parameters<typeof state.handleDeleteChat>[0]) => {
+    void state.handleDeleteChat(chat)
+  }, [state.handleDeleteChat])
+  const handleSidebarCopyPath = useCallback((localPath: string) => {
+    void state.handleCopyPath(localPath)
+  }, [state.handleCopyPath])
+  const handleSidebarOpenExternalPath = useCallback((action: "open_finder" | "open_editor", localPath: string) => {
+    void state.handleOpenExternalPath(action, localPath)
+  }, [state.handleOpenExternalPath])
+  const handleSidebarRemoveProject = useCallback((projectId: string) => {
+    void state.handleRemoveProject(projectId)
+  }, [state.handleRemoveProject])
+  const handleInstallUpdate = useCallback(() => {
+    void state.handleInstallUpdate()
+  }, [state.handleInstallUpdate])
+  const sidebarElement = useMemo(() => (
+    <KannaSidebar
+      data={state.sidebarData}
+      activeChatId={state.activeChatId}
+      connectionStatus={state.connectionStatus}
+      ready={state.sidebarReady}
+      open={state.sidebarOpen}
+      collapsed={state.sidebarCollapsed}
+      showMobileOpenButton={showMobileOpenButton}
+      onOpen={state.openSidebar}
+      onClose={state.closeSidebar}
+      onCollapse={state.collapseSidebar}
+      onExpand={state.expandSidebar}
+      onCreateChat={handleSidebarCreateChat}
+      onDeleteChat={handleSidebarDeleteChat}
+      onCopyPath={handleSidebarCopyPath}
+      onOpenExternalPath={handleSidebarOpenExternalPath}
+      onRemoveProject={handleSidebarRemoveProject}
+      editorLabel={state.editorLabel}
+      updateSnapshot={state.updateSnapshot}
+      onInstallUpdate={handleInstallUpdate}
+    />
+  ), [
+    handleInstallUpdate,
+    handleSidebarCopyPath,
+    handleSidebarCreateChat,
+    handleSidebarDeleteChat,
+    handleSidebarOpenExternalPath,
+    handleSidebarRemoveProject,
+    showMobileOpenButton,
+    state.activeChatId,
+    state.closeSidebar,
+    state.collapseSidebar,
+    state.connectionStatus,
+    state.editorLabel,
+    state.expandSidebar,
+    state.openSidebar,
+    state.sidebarCollapsed,
+    state.sidebarData,
+    state.sidebarOpen,
+    state.sidebarReady,
+    state.updateSnapshot,
+  ])
 
   useEffect(() => {
     const seenVersion = window.localStorage.getItem(VERSION_SEEN_STORAGE_KEY)
@@ -75,39 +136,7 @@ function KannaLayout() {
 
   return (
     <div className="flex h-[100dvh] min-h-[100dvh] overflow-hidden">
-      <KannaSidebar
-        data={state.sidebarData}
-        activeChatId={state.activeChatId}
-        connectionStatus={state.connectionStatus}
-        ready={state.sidebarReady}
-        open={state.sidebarOpen}
-        collapsed={state.sidebarCollapsed}
-        showMobileOpenButton={showMobileOpenButton}
-        onOpen={state.openSidebar}
-        onClose={state.closeSidebar}
-        onCollapse={state.collapseSidebar}
-        onExpand={state.expandSidebar}
-        onCreateChat={(projectId) => {
-          void state.handleCreateChat(projectId)
-        }}
-        onDeleteChat={(chat) => {
-          void state.handleDeleteChat(chat)
-        }}
-        onCopyPath={(localPath) => {
-          void state.handleCopyPath(localPath)
-        }}
-        onOpenExternalPath={(action, localPath) => {
-          void state.handleOpenExternalPath(action, localPath)
-        }}
-        onRemoveProject={(projectId) => {
-          void state.handleRemoveProject(projectId)
-        }}
-        editorLabel={state.editorLabel}
-        updateSnapshot={state.updateSnapshot}
-        onInstallUpdate={() => {
-          void state.handleInstallUpdate()
-        }}
-      />
+      {sidebarElement}
       <Outlet context={state} />
     </div>
   )
