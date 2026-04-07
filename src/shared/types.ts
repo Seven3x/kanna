@@ -470,8 +470,10 @@ export interface ContextWindowUsageSnapshot {
 
 export interface ChatDiffFile {
   path: string
-  changeType: "added" | "deleted" | "modified"
+  changeType: "added" | "deleted" | "modified" | "renamed"
   patch: string
+  mimeType?: string
+  size?: number
 }
 
 export interface ChatDiffSnapshot {

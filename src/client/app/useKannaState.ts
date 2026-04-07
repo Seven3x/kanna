@@ -45,6 +45,7 @@ function sameDiffs(left: ChatSnapshot["diffs"] | null | undefined, right: ChatSn
   if (left === right) return true
   if (!left || !right) return false
   if (left.status !== right.status) return false
+  if (left.branchName !== right.branchName) return false
   if (left.files.length !== right.files.length) return false
   return left.files.every((file, index) => {
     const other = right.files[index]
@@ -53,6 +54,19 @@ function sameDiffs(left: ChatSnapshot["diffs"] | null | undefined, right: ChatSn
       && file.changeType === other.changeType
       && file.patch === other.patch
   })
+}
+
+function shouldPreserveExistingProjectDiffs(
+  current: ChatSnapshot["diffs"] | null | undefined,
+  next: ChatSnapshot["diffs"] | null | undefined
+) {
+  return Boolean(
+    current
+    && current.status !== "unknown"
+    && next
+    && next.status === "unknown"
+    && next.files.length === 0
+  )
 }
 
 function sameChatSnapshotCore(left: ChatSnapshot | null, right: ChatSnapshot | null) {
@@ -138,6 +152,11 @@ function composerStateFromSendOptions(options?: {
   return null
 }
 
+function getProjectIdForChat(projectGroups: SidebarData["projectGroups"], chatId: string | null) {
+  if (!chatId) return null
+  return projectGroups.find((group) => group.chats.some((chat) => chat.chatId === chatId))?.groupKey ?? null
+}
+
 export function shouldAutoFollowTranscript(distanceFromBottom: number) {
   return distanceFromBottom < 24
 }
@@ -217,6 +236,7 @@ export function getActiveChatSnapshot(chatSnapshot: ChatSnapshot | null, activeC
 export interface KannaState {
   socket: KannaSocket
   activeChatId: string | null
+  activeProjectId: string | null
   sidebarData: SidebarData
   localProjects: LocalProjectsSnapshot | null
   updateSnapshot: UpdateSnapshot | null
@@ -287,7 +307,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [localProjects, setLocalProjects] = useState<LocalProjectsSnapshot | null>(null)
   const [updateSnapshot, setUpdateSnapshot] = useState<UpdateSnapshot | null>(null)
   const [chatSnapshot, setChatSnapshot] = useState<ChatSnapshot | null>(null)
-  const [chatDiffSnapshot, setChatDiffSnapshot] = useState<ChatSnapshot["diffs"] | null>(null)
+  const [projectDiffSnapshots, setProjectDiffSnapshots] = useState<Record<string, ChatSnapshot["diffs"] | null>>({})
   const [keybindings, setKeybindings] = useState<KeybindingsSnapshot | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<SocketStatus>("connecting")
   const [sidebarReady, setSidebarReady] = useState(false)
@@ -302,6 +322,10 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [startingLocalPath, setStartingLocalPath] = useState<string | null>(null)
   const [pendingChatId, setPendingChatId] = useState<string | null>(null)
   const [focusEpoch, setFocusEpoch] = useState(0)
+  const lastActiveProjectDiffRef = useRef<{ projectId: string | null; diffs: ChatSnapshot["diffs"] | null }>({
+    projectId: null,
+    diffs: null,
+  })
   const editorLabel = getEditorPresetLabel(useTerminalPreferencesStore((store) => store.editorPreset))
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -392,17 +416,16 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }, [])
 
   useEffect(() => {
+    const activeProjectId = getProjectIdForChat(sidebarData.projectGroups, activeChatId)
     if (!activeChatId) {
       logKannaState("clearing chat snapshot for non-chat route")
       setChatSnapshot(null)
-      setChatDiffSnapshot(null)
       setChatReady(true)
       return
     }
 
     logKannaState("subscribing to chat", { activeChatId })
     setChatSnapshot(null)
-    setChatDiffSnapshot(null)
     setChatReady(false)
     return socket.subscribe<ChatSnapshot | null>({ type: "chat", chatId: activeChatId }, (snapshot) => {
       logKannaState("chat snapshot received", {
@@ -412,11 +435,28 @@ export function useKannaState(activeChatId: string | null): KannaState {
         snapshotStatus: snapshot?.runtime.status ?? null,
       })
       setChatSnapshot((current) => sameChatSnapshotCore(current, snapshot) ? current : snapshot)
-      setChatDiffSnapshot((current) => sameDiffs(current, snapshot?.diffs ?? null) ? current : (snapshot?.diffs ?? null))
+      if (snapshot?.runtime.projectId) {
+        setProjectDiffSnapshots((current) => {
+          const projectId = snapshot.runtime.projectId
+          const nextDiffs = snapshot.diffs ?? null
+          if (shouldPreserveExistingProjectDiffs(current[projectId] ?? null, nextDiffs)) {
+            return current
+          }
+          if (sameDiffs(current[projectId] ?? null, nextDiffs)) {
+            return current
+          }
+          return {
+            ...current,
+            [projectId]: nextDiffs,
+          }
+        })
+      } else if (!activeProjectId && snapshot?.diffs === null) {
+        setProjectDiffSnapshots((current) => current)
+      }
       setChatReady(true)
       setCommandError(null)
     })
-  }, [activeChatId, socket])
+  }, [activeChatId, sidebarData.projectGroups, socket])
 
   useEffect(() => {
     if (selectedProjectId) return
@@ -495,6 +535,28 @@ export function useKannaState(activeChatId: string | null): KannaState {
     () => getActiveChatSnapshot(chatSnapshot, activeChatId),
     [activeChatId, chatSnapshot]
   )
+  const activeProjectId = useMemo(
+    () => activeChatSnapshot?.runtime.projectId
+      ?? getProjectIdForChat(sidebarData.projectGroups, activeChatId)
+      ?? selectedProjectId,
+    [activeChatId, activeChatSnapshot?.runtime.projectId, selectedProjectId, sidebarData.projectGroups]
+  )
+  const chatDiffSnapshot = useMemo(() => {
+    const currentDiffs = activeProjectId ? (projectDiffSnapshots[activeProjectId] ?? null) : null
+    if (activeProjectId && currentDiffs) {
+      lastActiveProjectDiffRef.current = {
+        projectId: activeProjectId,
+        diffs: currentDiffs,
+      }
+      return currentDiffs
+    }
+
+    if (activeProjectId && lastActiveProjectDiffRef.current.projectId === activeProjectId) {
+      return lastActiveProjectDiffRef.current.diffs
+    }
+
+    return currentDiffs
+  }, [activeProjectId, projectDiffSnapshots])
   useEffect(() => {
     logKannaState("active snapshot resolved", {
       routeChatId: activeChatId,
@@ -914,6 +976,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   return {
     socket,
     activeChatId,
+    activeProjectId,
     sidebarData,
     localProjects,
     updateSnapshot,

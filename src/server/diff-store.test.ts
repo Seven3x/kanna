@@ -104,4 +104,23 @@ describe("DiffStore", () => {
     const lastMessage = (await run(["git", "log", "-1", "--pretty=%B"], repoRoot)).trim()
     expect(lastMessage).toBe("Update app\n\nOnly app changes")
   })
+
+  test("detects renamed files", async () => {
+    const repoRoot = await createRepo()
+    tempDirs.push(repoRoot)
+    await writeFile(path.join(repoRoot, "before.txt"), "same\n", "utf8")
+    await run(["git", "add", "."], repoRoot)
+    await run(["git", "commit", "-m", "init"], repoRoot)
+    await run(["git", "mv", "before.txt", "after.txt"], repoRoot)
+
+    const store = new DiffStore(repoRoot)
+    await store.initialize()
+    await store.refreshSnapshot("chat-1", repoRoot)
+
+    const snapshot = store.getSnapshot("chat-1")
+    expect(snapshot.status).toBe("ready")
+    expect(snapshot.files).toHaveLength(1)
+    expect(snapshot.files[0]?.path).toBe("after.txt")
+    expect(snapshot.files[0]?.changeType).toBe("renamed")
+  })
 })

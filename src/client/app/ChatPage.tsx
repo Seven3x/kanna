@@ -124,7 +124,9 @@ export function ChatPage() {
   const pageFileDragDepthRef = useRef(0)
   const terminalDiffRefreshTimeoutRef = useRef<number | null>(null)
   const wasProcessingRef = useRef(false)
-  const projectId = state.runtime?.projectId ?? null
+  const activeChatIdRef = useRef<string | null>(state.activeChatId)
+  const projectPathRef = useRef<string | null>(state.runtime?.localPath ?? state.navbarLocalPath ?? null)
+  const projectId = state.activeProjectId
   const projectTerminalLayout = useTerminalLayoutStore((store) => (projectId ? store.projects[projectId] : undefined))
   const terminalLayout = projectTerminalLayout ?? DEFAULT_PROJECT_TERMINAL_LAYOUT
   const projectRightSidebarLayout = useRightSidebarStore((store) => (projectId ? store.projects[projectId] : undefined))
@@ -186,15 +188,24 @@ export function ChatPage() {
     canCancel: state.canCancel,
   })
 
+  useEffect(() => {
+    activeChatIdRef.current = state.activeChatId
+  }, [state.activeChatId])
+
+  useEffect(() => {
+    projectPathRef.current = state.runtime?.localPath ?? state.navbarLocalPath ?? null
+  }, [state.navbarLocalPath, state.runtime?.localPath])
+
   const refreshDiffs = useCallback(() => {
-    if (!state.activeChatId || !showRightSidebar) {
+    const chatId = activeChatIdRef.current
+    if (!chatId || !showRightSidebar) {
       return
     }
-    void state.socket.command({ type: "chat.refreshDiffs", chatId: state.activeChatId }).catch(() => {})
-  }, [showRightSidebar, state.activeChatId, state.socket])
+    void state.socket.command({ type: "chat.refreshDiffs", chatId }).catch(() => {})
+  }, [showRightSidebar, state.socket])
 
   const scheduleTerminalDiffRefresh = useCallback(() => {
-    if (!state.activeChatId || !showRightSidebar) {
+    if (!activeChatIdRef.current || !showRightSidebar) {
       return
     }
     if (terminalDiffRefreshTimeoutRef.current !== null) {
@@ -204,38 +215,40 @@ export function ChatPage() {
       terminalDiffRefreshTimeoutRef.current = null
       refreshDiffs()
     }, 1_000)
-  }, [refreshDiffs, showRightSidebar, state.activeChatId])
+  }, [refreshDiffs, showRightSidebar])
 
   const handleOpenDiffFile = useCallback((filePath: string) => {
-    const projectPath = state.runtime?.localPath ?? state.navbarLocalPath ?? null
+    const projectPath = projectPathRef.current
     const resolvedPath = !projectPath || isAbsoluteLocalPath(filePath)
       ? filePath
       : joinProjectRelativePath(projectPath, filePath)
     void state.handleOpenLocalLink({ path: resolvedPath })
-  }, [state.handleOpenLocalLink, state.navbarLocalPath, state.runtime?.localPath])
+  }, [state.handleOpenLocalLink])
 
   const handleCommitDiffs = useCallback(async (args: { paths: string[]; summary: string; description: string }) => {
-    if (!state.activeChatId) {
+    const chatId = activeChatIdRef.current
+    if (!chatId) {
       return
     }
     await state.socket.command({
       type: "chat.commitDiffs",
-      chatId: state.activeChatId,
+      chatId,
       paths: args.paths,
       summary: args.summary,
       description: args.description,
     })
     refreshDiffs()
-  }, [refreshDiffs, state.activeChatId, state.socket])
+  }, [refreshDiffs, state.socket])
 
   const handleGenerateCommitMessage = useCallback(async (args: { paths: string[] }) => {
-    if (!state.activeChatId) {
+    const chatId = activeChatIdRef.current
+    if (!chatId) {
       return { subject: "", body: "" }
     }
 
     const result = await state.socket.command<{ subject: string; body: string }>({
       type: "chat.generateCommitMessage",
-      chatId: state.activeChatId,
+      chatId,
       paths: args.paths,
     })
 
@@ -243,7 +256,7 @@ export function ChatPage() {
       subject: result.subject,
       body: result.body,
     }
-  }, [state.activeChatId, state.socket])
+  }, [state.socket])
 
   function hasDraggedFiles(event: React.DragEvent) {
     return hasFileDragTypes(event.dataTransfer?.types ?? [])
@@ -368,7 +381,7 @@ export function ChatPage() {
   }, [state.updateScrollState])
 
   useEffect(() => {
-    if (!state.activeChatId || !showRightSidebar) {
+    if (!projectId || !showRightSidebar) {
       return
     }
 
@@ -377,18 +390,18 @@ export function ChatPage() {
     }, DIFF_REFRESH_INTERVAL_MS)
 
     return () => window.clearInterval(intervalId)
-  }, [refreshDiffs, showRightSidebar, state.activeChatId])
+  }, [projectId, refreshDiffs, showRightSidebar])
 
   useEffect(() => {
-    if (!state.activeChatId || !showRightSidebar) {
+    if (!projectId || !showRightSidebar) {
       return
     }
 
     refreshDiffs()
-  }, [refreshDiffs, showRightSidebar, state.activeChatId])
+  }, [projectId, refreshDiffs, showRightSidebar])
 
   useEffect(() => {
-    if (!state.activeChatId || !showRightSidebar) {
+    if (!projectId || !showRightSidebar) {
       return
     }
 
@@ -404,14 +417,14 @@ export function ChatPage() {
       window.removeEventListener("focus", handleDiffRefresh)
       document.removeEventListener("visibilitychange", handleDiffRefresh)
     }
-  }, [refreshDiffs, showRightSidebar, state.activeChatId])
+  }, [projectId, refreshDiffs, showRightSidebar])
 
   useEffect(() => {
     if (showRightSidebar && wasProcessingRef.current && !state.isProcessing) {
       refreshDiffs()
     }
     wasProcessingRef.current = state.isProcessing
-  }, [refreshDiffs, showRightSidebar, state.activeChatId, state.isProcessing])
+  }, [projectId, refreshDiffs, showRightSidebar, state.isProcessing])
 
   useEffect(() => {
     return () => {
@@ -429,7 +442,7 @@ export function ChatPage() {
       window.clearTimeout(terminalDiffRefreshTimeoutRef.current)
       terminalDiffRefreshTimeoutRef.current = null
     }
-  }, [showRightSidebar, state.activeChatId])
+  }, [projectId, showRightSidebar])
 
   useEffect(() => {
     const element = layoutRootRef.current
@@ -802,7 +815,7 @@ export function ChatPage() {
               } as CSSProperties}
             >
               <RightSidebar
-                chatId={state.activeChatId}
+                projectId={projectId}
                 diffs={state.chatDiffSnapshot ?? { status: "unknown", files: [] }}
                 diffRenderMode={diffRenderMode}
                 wrapLines={wrapDiffLines}

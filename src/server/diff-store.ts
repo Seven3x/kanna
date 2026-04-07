@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import type { ChatDiffFile, ChatDiffSnapshot } from "../shared/types"
 import { generateCommitMessageDetailed } from "./generate-commit-message"
+import { inferProjectFileContentType } from "./uploads"
 
 interface StoredChatDiffState {
   status: ChatDiffSnapshot["status"]
@@ -32,6 +33,12 @@ function snapshotsEqual(left: StoredChatDiffState | undefined, right: StoredChat
       && file.changeType === other.changeType
       && file.patch === other.patch
   })
+}
+
+interface DirtyPathEntry {
+  path: string
+  previousPath?: string
+  changeType: ChatDiffFile["changeType"]
 }
 
 async function fileExists(filePath: string) {
@@ -89,24 +96,43 @@ async function getBranchName(repoRoot: string) {
   return undefined
 }
 
-function parseStatusPaths(output: string) {
-  const paths = new Set<string>()
-
+function parseStatusPaths(output: string): DirtyPathEntry[] {
+  const entries: DirtyPathEntry[] = []
   for (const rawLine of output.split(/\r?\n/u)) {
     const line = rawLine.trimEnd()
     if (line.length < 4) continue
+    const statusCode = line.slice(0, 2)
     const value = line.slice(3)
     if (!value) continue
-    if (value.includes(" -> ")) {
-      const [fromPath, toPath] = value.split(" -> ")
-      if (fromPath) paths.add(fromPath)
-      if (toPath) paths.add(toPath)
+    const isRename = statusCode.includes("R")
+    const isDelete = statusCode.includes("D")
+    const isAdd = statusCode.includes("A") || statusCode === "??"
+    const changeType: ChatDiffFile["changeType"] = isRename
+      ? "renamed"
+      : isDelete
+        ? "deleted"
+        : isAdd
+          ? "added"
+          : "modified"
+
+    if (isRename && value.includes(" -> ")) {
+      const [previousPath, nextPath] = value.split(" -> ")
+      if (nextPath) {
+        entries.push({
+          path: nextPath,
+          previousPath: previousPath || undefined,
+          changeType,
+        })
+      }
       continue
     }
-    paths.add(value)
-  }
 
-  return [...paths].sort((left, right) => left.localeCompare(right))
+    entries.push({
+      path: value,
+      changeType,
+    })
+  }
+  return entries.sort((left, right) => left.path.localeCompare(right.path))
 }
 
 async function listDirtyPaths(repoRoot: string) {
@@ -140,7 +166,7 @@ async function readBaseFile(repoRoot: string, baseCommit: string | null, relativ
   return result.stdout
 }
 
-async function createPatch(relativePath: string, beforeText: string | null, afterText: string | null) {
+async function createPatch(beforePathLabel: string, afterPathLabel: string, beforeText: string | null, afterText: string | null) {
   const tempDir = await mkdtemp(path.join(tmpdir(), "kanna-diff-"))
   const beforePath = path.join(tempDir, "before")
   const afterPath = path.join(tempDir, "after")
@@ -165,13 +191,13 @@ async function createPatch(relativePath: string, beforeText: string | null, afte
     )
 
     if (result.exitCode !== 0 && result.exitCode !== 1) {
-      throw new Error(result.stderr.trim() || `Failed to build patch for ${relativePath}`)
+      throw new Error(result.stderr.trim() || `Failed to build patch for ${afterPathLabel}`)
     }
 
     return result.stdout
-      .replace("diff --git a/before b/after", `diff --git a/${relativePath} b/${relativePath}`)
-      .replace("--- a/before", `--- a/${relativePath}`)
-      .replace("+++ b/after", `+++ b/${relativePath}`)
+      .replace("diff --git a/before b/after", `diff --git a/${beforePathLabel} b/${afterPathLabel}`)
+      .replace("--- a/before", `--- a/${beforePathLabel}`)
+      .replace("+++ b/after", `+++ b/${afterPathLabel}`)
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
@@ -181,19 +207,28 @@ async function computeCurrentFiles(repoRoot: string, baseCommit: string | null):
   const currentDirtyPaths = await listDirtyPaths(repoRoot)
   const files: ChatDiffFile[] = []
 
-  for (const relativePath of currentDirtyPaths) {
-    const beforeText = await readBaseFile(repoRoot, baseCommit, relativePath)
+  for (const entry of currentDirtyPaths) {
+    const relativePath = entry.path
+    const beforePath = entry.previousPath ?? relativePath
+    const beforeText = await readBaseFile(repoRoot, baseCommit, beforePath)
     const afterText = await readWorktreeFile(repoRoot, relativePath)
+    const absolutePath = path.join(repoRoot, relativePath)
+    const fileInfo = await stat(absolutePath).catch(() => null)
+    const file = fileInfo?.isFile() ? Bun.file(absolutePath) : null
+    const mimeType = file ? inferProjectFileContentType(relativePath, file.type) : undefined
+    const size = fileInfo?.isFile() ? fileInfo.size : undefined
 
-    if (beforeText === afterText) {
+    if (beforeText === afterText && entry.changeType !== "renamed") {
       continue
     }
 
-    const patch = await createPatch(relativePath, beforeText, afterText)
+    const patch = await createPatch(beforePath, relativePath, beforeText, afterText)
     files.push({
       path: relativePath,
-      changeType: beforeText === null ? "added" : afterText === null ? "deleted" : "modified",
+      changeType: entry.changeType,
       patch,
+      mimeType,
+      size,
     })
   }
 
@@ -303,7 +338,7 @@ export class DiffStore {
       throw new Error("Project is not in a git repository")
     }
 
-    const currentDirtyPaths = new Set(await listDirtyPaths(repo.repoRoot))
+    const currentDirtyPaths = new Set((await listDirtyPaths(repo.repoRoot)).map((entry) => entry.path))
     const missingPaths = normalizedPaths.filter((relativePath) => !currentDirtyPaths.has(relativePath))
     if (missingPaths.length > 0) {
       throw new Error(`File is no longer changed: ${missingPaths[0]}`)

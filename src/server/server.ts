@@ -12,7 +12,7 @@ import { TerminalManager } from "./terminal-manager"
 import { UpdateManager } from "./update-manager"
 import type { UpdateInstallAttemptResult } from "./cli-runtime"
 import { createWsRouter, type ClientState } from "./ws-router"
-import { deleteProjectUpload, inferAttachmentContentType, persistProjectUpload } from "./uploads"
+import { deleteProjectUpload, inferAttachmentContentType, inferProjectFileContentType, persistProjectUpload } from "./uploads"
 import { getProjectUploadDir } from "./paths"
 
 const MAX_UPLOAD_FILES = 10
@@ -155,6 +155,11 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
             return attachmentContentResponse
           }
 
+          const projectFileContentResponse = await handleProjectFileContent(req, url, store)
+          if (projectFileContentResponse) {
+            return projectFileContentResponse
+          }
+
           return serveStatic(distDir, url.pathname)
         },
         websocket: {
@@ -290,6 +295,54 @@ async function handleAttachmentContent(req: Request, url: URL, store: EventStore
   return new Response(file, {
     headers: {
       "Content-Type": inferAttachmentContentType(storedName, file.type),
+    },
+  })
+}
+
+async function handleProjectFileContent(req: Request, url: URL, store: EventStore) {
+  const match = url.pathname.match(/^\/api\/projects\/([^/]+)\/files\/([^/]+)\/content$/)
+  if (!match) {
+    return null
+  }
+
+  if (req.method !== "GET") {
+    return new Response(null, {
+      status: 405,
+      headers: {
+        Allow: "GET",
+      },
+    })
+  }
+
+  const project = store.getProject(match[1])
+  if (!project) {
+    return Response.json({ error: "Project not found" }, { status: 404 })
+  }
+
+  const relativePath = path.posix.normalize(decodeURIComponent(match[2]).replaceAll("\\", "/"))
+  if (!relativePath || relativePath === "." || relativePath.startsWith("../") || relativePath.includes("/../") || path.posix.isAbsolute(relativePath)) {
+    return Response.json({ error: "Invalid project file path" }, { status: 400 })
+  }
+
+  const filePath = path.resolve(project.localPath, relativePath)
+  const projectRoot = path.resolve(project.localPath)
+  if (filePath !== projectRoot && !filePath.startsWith(`${projectRoot}${path.sep}`)) {
+    return Response.json({ error: "Invalid project file path" }, { status: 400 })
+  }
+
+  const file = Bun.file(filePath)
+  try {
+    const info = await stat(filePath)
+    if (!info.isFile()) {
+      return Response.json({ error: "File not found" }, { status: 404 })
+    }
+  } catch {
+    return Response.json({ error: "File not found" }, { status: 404 })
+  }
+
+  return new Response(file, {
+    headers: {
+      "Content-Type": inferProjectFileContentType(relativePath, file.type),
     },
   })
 }

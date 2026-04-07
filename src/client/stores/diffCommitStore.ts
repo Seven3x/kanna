@@ -2,17 +2,17 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
 interface DiffCommitState {
-  checkedPathsByChatId: Record<string, Record<string, boolean>>
-  reconcileChat: (chatId: string, paths: string[]) => void
-  setChecked: (chatId: string, path: string, checked: boolean) => void
+  checkedPathsByProjectId: Record<string, Record<string, boolean>>
+  reconcileProject: (projectId: string, paths: string[]) => void
+  setChecked: (projectId: string, path: string, checked: boolean) => void
 }
 
 export const useDiffCommitStore = create<DiffCommitState>()(
   persist(
     (set) => ({
-      checkedPathsByChatId: {},
-      reconcileChat: (chatId, paths) => set((state) => {
-        const current = state.checkedPathsByChatId[chatId] ?? {}
+      checkedPathsByProjectId: {},
+      reconcileProject: (projectId, paths) => set((state) => {
+        const current = state.checkedPathsByProjectId[projectId] ?? {}
         const next = Object.fromEntries(paths.map((path) => [path, current[path] ?? true]))
         if (
           Object.keys(current).length === Object.keys(next).length
@@ -21,17 +21,17 @@ export const useDiffCommitStore = create<DiffCommitState>()(
           return state
         }
         return {
-          checkedPathsByChatId: {
-            ...state.checkedPathsByChatId,
-            [chatId]: next,
+          checkedPathsByProjectId: {
+            ...state.checkedPathsByProjectId,
+            [projectId]: next,
           },
         }
       }),
-      setChecked: (chatId, path, checked) => set((state) => ({
-        checkedPathsByChatId: {
-          ...state.checkedPathsByChatId,
-          [chatId]: {
-            ...(state.checkedPathsByChatId[chatId] ?? {}),
+      setChecked: (projectId, path, checked) => set((state) => ({
+        checkedPathsByProjectId: {
+          ...state.checkedPathsByProjectId,
+          [projectId]: {
+            ...(state.checkedPathsByProjectId[projectId] ?? {}),
             [path]: checked,
           },
         },
@@ -39,7 +39,7 @@ export const useDiffCommitStore = create<DiffCommitState>()(
     }),
     {
       name: "diff-commit-selections",
-      version: 1,
+      version: 2,
     }
   )
 )
