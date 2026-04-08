@@ -50,17 +50,20 @@ function getDiffPreviewAttachment(projectId: string | null, file: DiffFile): Cha
   }
 }
 
-interface RightSidebarProps {
-  projectId: string | null
-  diffs: ChatDiffSnapshot
-  editorLabel: string
-  diffRenderMode: DiffRenderMode
-  wrapLines: boolean
+export interface DiffFileActions {
   onOpenFile: (path: string) => void
   onDiscardFile: (path: string) => void
   onIgnoreFile: (path: string) => void
   onCopyFilePath: (path: string) => void
   onCopyRelativePath: (path: string) => void
+}
+
+interface RightSidebarProps extends DiffFileActions {
+  projectId: string | null
+  diffs: ChatDiffSnapshot
+  editorLabel: string
+  diffRenderMode: DiffRenderMode
+  wrapLines: boolean
   onListBranches: () => Promise<ChatBranchListResult>
   onCheckoutBranch: (branch: ChatBranchListEntry) => Promise<void>
   onCreateBranch: () => Promise<void>
@@ -448,11 +451,7 @@ function DiffFileCard({
   wrapLines,
   onToggleCollapsed,
   onToggleChecked,
-  onOpenFile,
-  onDiscardFile,
-  onIgnoreFile,
-  onCopyFilePath,
-  onCopyRelativePath,
+  fileActions,
 }: {
   file: DiffFile
   rootRef: RefObject<HTMLDivElement | null>
@@ -464,11 +463,7 @@ function DiffFileCard({
   wrapLines: boolean
   onToggleCollapsed: () => void
   onToggleChecked: () => void
-  onOpenFile: (path: string) => void
-  onDiscardFile: (path: string) => void
-  onIgnoreFile: (path: string) => void
-  onCopyFilePath: (path: string) => void
-  onCopyRelativePath: (path: string) => void
+  fileActions: DiffFileActions
 }) {
   const counts = getPatchCounts(file.patch)
   const canIgnore = canIgnoreDiffFile(file)
@@ -593,7 +588,7 @@ function DiffFileCard({
         <ContextMenuItem
           onSelect={(event) => {
             event.stopPropagation()
-            onOpenFile(file.path)
+            fileActions.onOpenFile(file.path)
           }}
         >
           <Code className="h-3.5 w-3.5" />
@@ -602,7 +597,7 @@ function DiffFileCard({
         <ContextMenuItem
           onSelect={(event) => {
             event.stopPropagation()
-            onDiscardFile(file.path)
+            fileActions.onDiscardFile(file.path)
           }}
           className="text-destructive dark:text-red-400 hover:bg-destructive/10 focus:bg-destructive/10 dark:hover:bg-red-500/20 dark:focus:bg-red-500/20"
         >
@@ -614,7 +609,7 @@ function DiffFileCard({
           onSelect={(event) => {
             event.stopPropagation()
             if (!canIgnore) return
-            onIgnoreFile(file.path)
+            fileActions.onIgnoreFile(file.path)
           }}
         >
           <Ban className="h-3.5 w-3.5" />
@@ -624,7 +619,7 @@ function DiffFileCard({
         <ContextMenuItem
           onSelect={(event) => {
             event.stopPropagation()
-            onCopyFilePath(file.path)
+            fileActions.onCopyFilePath(file.path)
           }}
         >
           <Copy className="h-3.5 w-3.5" />
@@ -633,7 +628,7 @@ function DiffFileCard({
         <ContextMenuItem
           onSelect={(event) => {
             event.stopPropagation()
-            onCopyRelativePath(file.path)
+            fileActions.onCopyRelativePath(file.path)
           }}
         >
           <Copy className="h-3.5 w-3.5" />
@@ -665,6 +660,13 @@ function RightSidebarImpl({
   onWrapLinesChange,
   onClose,
 }: RightSidebarProps) {
+  const fileActions: DiffFileActions = useMemo(() => ({
+    onOpenFile,
+    onDiscardFile,
+    onIgnoreFile,
+    onCopyFilePath,
+    onCopyRelativePath,
+  }), [onOpenFile, onDiscardFile, onIgnoreFile, onCopyFilePath, onCopyRelativePath])
   const hasChanges = diffs.files.length > 0
   const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(diffs.files.map((file) => [file.path, true]))
@@ -991,11 +993,7 @@ function RightSidebarImpl({
                         if (!projectId) return
                         setCheckedPath(projectId, file.path, !isChecked)
                       }}
-                      onOpenFile={onOpenFile}
-                      onDiscardFile={onDiscardFile}
-                      onIgnoreFile={onIgnoreFile}
-                      onCopyFilePath={onCopyFilePath}
-                      onCopyRelativePath={onCopyRelativePath}
+                      fileActions={fileActions}
                     />
                   )
                 })}

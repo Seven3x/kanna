@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import type {
+  BranchMetadata,
   ChatBranchHistoryEntry,
   ChatBranchHistorySnapshot,
   ChatBranchListEntry,
@@ -13,19 +14,13 @@ import type {
   ChatSyncResult,
   DiffCommitMode,
   DiffCommitResult,
+  UpstreamStatus,
 } from "../shared/types"
 import { generateCommitMessageDetailed } from "./generate-commit-message"
 import { inferProjectFileContentType } from "./uploads"
 
-interface StoredChatDiffState {
+interface StoredChatDiffState extends BranchMetadata, UpstreamStatus {
   status: ChatDiffSnapshot["status"]
-  branchName?: string
-  defaultBranchName?: string
-  originRepoSlug?: string
-  hasUpstream?: boolean
-  aheadCount?: number
-  behindCount?: number
-  lastFetchedAt?: string
   files: ChatDiffFile[]
   branchHistory: ChatBranchHistorySnapshot
 }
@@ -45,22 +40,23 @@ function createEmptyState(): StoredChatDiffState {
   }
 }
 
-function snapshotsEqual(left: StoredChatDiffState | undefined, right: StoredChatDiffState) {
-  if (!left) {
-    return right.status === "unknown" && right.files.length === 0
-  }
-  if (left.status !== right.status) return false
-  if (left.branchName !== right.branchName) return false
-  if (left.defaultBranchName !== right.defaultBranchName) return false
-  if (left.originRepoSlug !== right.originRepoSlug) return false
-  if (left.hasUpstream !== right.hasUpstream) return false
-  if (left.aheadCount !== right.aheadCount) return false
-  if (left.behindCount !== right.behindCount) return false
-  if (left.lastFetchedAt !== right.lastFetchedAt) return false
-  if (left.files.length !== right.files.length) return false
-  if (left.branchHistory.entries.length !== right.branchHistory.entries.length) return false
-  const sameHistory = left.branchHistory.entries.every((entry, index) => {
-    const other = right.branchHistory.entries[index]
+function branchMetadataEqual(left: BranchMetadata, right: BranchMetadata) {
+  return left.branchName === right.branchName
+    && left.defaultBranchName === right.defaultBranchName
+    && left.originRepoSlug === right.originRepoSlug
+    && left.hasUpstream === right.hasUpstream
+}
+
+function upstreamStatusEqual(left: UpstreamStatus, right: UpstreamStatus) {
+  return left.aheadCount === right.aheadCount
+    && left.behindCount === right.behindCount
+    && left.lastFetchedAt === right.lastFetchedAt
+}
+
+function branchHistoryEqual(left: ChatBranchHistorySnapshot, right: ChatBranchHistorySnapshot) {
+  if (left.entries.length !== right.entries.length) return false
+  return left.entries.every((entry, index) => {
+    const other = right.entries[index]
     return Boolean(other)
       && entry.sha === other.sha
       && entry.summary === other.summary
@@ -71,7 +67,17 @@ function snapshotsEqual(left: StoredChatDiffState | undefined, right: StoredChat
       && entry.tags.length === other.tags.length
       && entry.tags.every((tag, tagIndex) => tag === other.tags[tagIndex])
   })
-  if (!sameHistory) return false
+}
+
+function snapshotsEqual(left: StoredChatDiffState | undefined, right: StoredChatDiffState) {
+  if (!left) {
+    return right.status === "unknown" && right.files.length === 0
+  }
+  if (left.status !== right.status) return false
+  if (!branchMetadataEqual(left, right)) return false
+  if (!upstreamStatusEqual(left, right)) return false
+  if (left.files.length !== right.files.length) return false
+  if (!branchHistoryEqual(left.branchHistory, right.branchHistory)) return false
   return left.files.every((file, index) => {
     const other = right.files[index]
     return Boolean(other)
@@ -464,16 +470,40 @@ function buildGitHubCommitUrl(remoteUrl: string | null, sha: string) {
   return slug ? `https://github.com/${slug}/commit/${sha}` : undefined
 }
 
-async function listCommitTags(repoRoot: string, sha: string) {
-  const result = await runGit(["tag", "--points-at", sha], repoRoot)
-  if (result.exitCode !== 0) {
-    return []
+async function getTagsByCommit(repoRoot: string, shas: string[]): Promise<Map<string, string[]>> {
+  const tagMap = new Map<string, string[]>()
+  if (shas.length === 0) return tagMap
+
+  for (const sha of shas) {
+    tagMap.set(sha, [])
   }
-  return result.stdout
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .sort((left, right) => left.localeCompare(right))
+
+  const result = await runGit(
+    ["log", "--max-count", String(shas.length), "--decorate-refs=refs/tags", "--format=%H %D", shas[0]!],
+    repoRoot
+  )
+
+  if (result.exitCode !== 0) return tagMap
+
+  for (const line of result.stdout.split(/\r?\n/u)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const spaceIndex = trimmed.indexOf(" ")
+    if (spaceIndex < 0) continue
+    const sha = trimmed.slice(0, spaceIndex)
+    const decorations = trimmed.slice(spaceIndex + 1)
+    if (!tagMap.has(sha) || !decorations) continue
+    const tags = decorations
+      .split(",")
+      .map((decoration) => decoration.trim())
+      .filter((decoration) => decoration.startsWith("tag: "))
+      .map((decoration) => decoration.slice(5))
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right))
+    tagMap.set(sha, tags)
+  }
+
+  return tagMap
 }
 
 async function getBranchHistory(args: {
@@ -497,23 +527,29 @@ async function getBranchHistory(args: {
   }
 
   const remoteUrl = await getOriginRemoteUrl(args.repoRoot)
-  const entries: ChatBranchHistoryEntry[] = []
+  const parsedRecords: Array<{ sha: string; summary: string; description: string; authorName?: string; authoredAt: string }> = []
 
   for (const record of logResult.stdout.split("\u001e")) {
     const trimmed = record.trim()
     if (!trimmed) continue
     const [sha, summary, description, authorName, authoredAt] = trimmed.split("\u001f")
     if (!sha || !summary || !authoredAt) continue
-    entries.push({
+    parsedRecords.push({
       sha,
       summary,
       description: (description ?? "").trim(),
       authorName: authorName?.trim() || undefined,
       authoredAt,
-      tags: await listCommitTags(args.repoRoot, sha),
-      githubUrl: buildGitHubCommitUrl(remoteUrl, sha),
     })
   }
+
+  const tagMap = await getTagsByCommit(args.repoRoot, parsedRecords.map((record) => record.sha))
+
+  const entries: ChatBranchHistoryEntry[] = parsedRecords.map((record) => ({
+    ...record,
+    tags: tagMap.get(record.sha) ?? [],
+    githubUrl: buildGitHubCommitUrl(remoteUrl, record.sha),
+  }))
 
   return { entries }
 }

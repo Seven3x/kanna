@@ -206,9 +206,14 @@ const ChatTranscriptViewport = memo(function ChatTranscriptViewport({
   })
 
   useEffect(() => {
-    if (!contentRootRef.current) return
+    const contentRoot = contentRootRef.current
+    if (!contentRoot) return
+
     const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width
+      const rect = entries[0]?.contentRect
+      if (!rect) return
+
+      const width = rect.width
       setTranscriptContentWidth((current) => {
         const nextWidth = typeof width === "number" ? width : null
         if (nextWidth === null && current === null) return current
@@ -217,23 +222,13 @@ const ChatTranscriptViewport = memo(function ChatTranscriptViewport({
         }
         return nextWidth
       })
-    })
-    observer.observe(contentRootRef.current)
-    return () => observer.disconnect()
-  }, [])
 
-  useEffect(() => {
-    const contentRoot = contentRootRef.current
-    if (!contentRoot) return
-
-    const observer = new ResizeObserver(() => {
-      if (showScrollButton) return
-      if (pendingPrependAnchorRef.current) return
-
-      const scrollContainer = scrollRef.current
-      if (!scrollContainer) return
-
-      scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: "auto" })
+      if (!showScrollButton && !pendingPrependAnchorRef.current) {
+        const scrollContainer = scrollRef.current
+        if (scrollContainer) {
+          scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: "auto" })
+        }
+      }
     })
 
     observer.observe(contentRoot)

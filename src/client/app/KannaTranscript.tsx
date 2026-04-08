@@ -228,16 +228,6 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
 }: TranscriptSingleRowProps) {
   let rendered: React.ReactNode = null
 
-  if (!shouldRenderTranscriptSingleRow(message, {
-    isFirstSystem,
-    isFirstAccount,
-    isLatestTodoWrite,
-    hideResult,
-    isFinalStatus,
-  })) {
-    return null
-  }
-
   if (message.kind === "user_prompt") {
     rendered = <UserMessage key={message.id} content={message.content} attachments={message.attachments} />
   } else {
