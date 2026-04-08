@@ -31,6 +31,12 @@ async function createRepo() {
   return root
 }
 
+async function createBareRemote() {
+  const root = await mkdtemp(path.join(tmpdir(), "kanna-diff-remote-"))
+  await run(["git", "init", "--bare"], root)
+  return root
+}
+
 const tempDirs: string[] = []
 
 describe("DiffStore", () => {
@@ -48,15 +54,18 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
 
-    const snapshot = store.getSnapshot("chat-1")
+    const snapshot = store.getProjectSnapshot("project-1")
     expect(snapshot.status).toBe("ready")
     expect(snapshot.files).toHaveLength(1)
     expect(snapshot.files[0]?.path).toBe("app.txt")
     expect(snapshot.files[0]?.isUntracked).toBe(false)
-    expect(snapshot.files[0]?.patch).toContain("-base")
-    expect(snapshot.files[0]?.patch).toContain("+changed")
+    expect(snapshot.files[0]?.additions).toBe(1)
+    expect(snapshot.files[0]?.deletions).toBe(1)
+    await expect(store.readPatch({ projectPath: repoRoot, path: "app.txt" })).resolves.toMatchObject({
+      patch: expect.stringContaining("-base"),
+    })
   })
 
   test("returns no_repo outside a git repository", async () => {
@@ -65,9 +74,9 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(root)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", root)
+    await store.refreshSnapshot("project-1", root)
 
-    expect(store.getSnapshot("chat-1")).toEqual({
+    expect(store.getProjectSnapshot("project-1")).toEqual({
       status: "no_repo",
       branchName: undefined,
       files: [],
@@ -88,10 +97,10 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
 
     await store.commitFiles({
-      chatId: "chat-1",
+      projectId: "project-1",
       projectPath: repoRoot,
       paths: ["app.txt"],
       summary: "Update app",
@@ -99,13 +108,44 @@ describe("DiffStore", () => {
       mode: "commit_only",
     })
 
-    const snapshot = store.getSnapshot("chat-1")
+    const snapshot = store.getProjectSnapshot("project-1")
     expect(snapshot.status).toBe("ready")
     expect(snapshot.files).toHaveLength(1)
     expect(snapshot.files[0]?.path).toBe("notes.txt")
 
     const lastMessage = (await run(["git", "log", "-1", "--pretty=%B"], repoRoot)).trim()
     expect(lastMessage).toBe("Update app\n\nOnly app changes")
+  })
+
+  test("commit_and_push publishes an unpublished branch", async () => {
+    const repoRoot = await createRepo()
+    const remoteRoot = await createBareRemote()
+    tempDirs.push(repoRoot, remoteRoot)
+    await run(["git", "remote", "add", "origin", remoteRoot], repoRoot)
+    await writeFile(path.join(repoRoot, "app.txt"), "base\n", "utf8")
+    await run(["git", "add", "."], repoRoot)
+    await run(["git", "commit", "-m", "init"], repoRoot)
+    await run(["git", "switch", "-c", "feature/publish-me"], repoRoot)
+    await writeFile(path.join(repoRoot, "app.txt"), "changed\n", "utf8")
+
+    const store = new DiffStore(repoRoot)
+    await store.initialize()
+    await store.refreshSnapshot("project-1", repoRoot)
+
+    const result = await store.commitFiles({
+      projectId: "project-1",
+      projectPath: repoRoot,
+      paths: ["app.txt"],
+      summary: "Publish branch",
+      mode: "commit_and_push",
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "commit_and_push",
+      pushed: true,
+    })
+    expect((await run(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repoRoot)).trim()).toBe("origin/feature/publish-me")
   })
 
   test("detects renamed files", async () => {
@@ -118,9 +158,9 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
 
-    const snapshot = store.getSnapshot("chat-1")
+    const snapshot = store.getProjectSnapshot("project-1")
     expect(snapshot.status).toBe("ready")
     expect(snapshot.files).toHaveLength(1)
     expect(snapshot.files[0]?.path).toBe("after.txt")
@@ -138,9 +178,9 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
 
-    const snapshot = store.getSnapshot("chat-1")
+    const snapshot = store.getProjectSnapshot("project-1")
     expect(snapshot.files).toHaveLength(1)
     expect(snapshot.files[0]).toMatchObject({
       path: "scratch.log",
@@ -159,15 +199,15 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
     await store.discardFile({
-      chatId: "chat-1",
+      projectId: "project-1",
       projectPath: repoRoot,
       path: "app.txt",
     })
 
     expect(await readFile(path.join(repoRoot, "app.txt"), "utf8")).toBe("base\n")
-    expect(store.getSnapshot("chat-1").files).toHaveLength(0)
+    expect(store.getProjectSnapshot("project-1").files).toHaveLength(0)
   })
 
   test("discardFile deletes an untracked file", async () => {
@@ -180,15 +220,15 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
     await store.discardFile({
-      chatId: "chat-1",
+      projectId: "project-1",
       projectPath: repoRoot,
       path: "scratch.log",
     })
 
     expect(await Bun.file(path.join(repoRoot, "scratch.log")).exists()).toBe(false)
-    expect(store.getSnapshot("chat-1").files).toHaveLength(0)
+    expect(store.getProjectSnapshot("project-1").files).toHaveLength(0)
   })
 
   test("discardFile reverts a renamed file", async () => {
@@ -201,16 +241,16 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
     await store.discardFile({
-      chatId: "chat-1",
+      projectId: "project-1",
       projectPath: repoRoot,
       path: "after.txt",
     })
 
     expect(await Bun.file(path.join(repoRoot, "before.txt")).exists()).toBe(true)
     expect(await Bun.file(path.join(repoRoot, "after.txt")).exists()).toBe(false)
-    expect(store.getSnapshot("chat-1").files).toHaveLength(0)
+    expect(store.getProjectSnapshot("project-1").files).toHaveLength(0)
   })
 
   test("ignoreFile appends a .gitignore entry once", async () => {
@@ -223,9 +263,9 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
     await store.ignoreFile({
-      chatId: "chat-1",
+      projectId: "project-1",
       projectPath: repoRoot,
       path: "scratch.log",
     })
@@ -256,9 +296,9 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
 
-    const snapshot = store.getSnapshot("chat-1")
+    const snapshot = store.getProjectSnapshot("project-1")
     expect(snapshot.branchHistory?.entries).toHaveLength(1)
     expect(snapshot.branchHistory?.entries[0]).toMatchObject({
       summary: "Initial commit",
@@ -278,10 +318,10 @@ describe("DiffStore", () => {
 
     const store = new DiffStore(repoRoot)
     await store.initialize()
-    await store.refreshSnapshot("chat-1", repoRoot)
+    await store.refreshSnapshot("project-1", repoRoot)
 
     await expect(store.ignoreFile({
-      chatId: "chat-1",
+      projectId: "project-1",
       projectPath: repoRoot,
       path: "app.txt",
     })).rejects.toThrow("Only untracked files can be ignored from the diff viewer")
@@ -414,7 +454,7 @@ describe("DiffStore", () => {
     const store = new DiffStore(repoRoot)
     await store.initialize()
     const result = await store.checkoutBranch({
-      chatId: "chat-1",
+      projectId: "project-1",
       projectPath: repoRoot,
       branch: { kind: "remote", name: "feature/remote", remoteRef: "origin/feature/remote" },
     })
@@ -436,7 +476,7 @@ describe("DiffStore", () => {
     const store = new DiffStore(repoRoot)
     await store.initialize()
     const result = await store.checkoutBranch({
-      chatId: "chat-1",
+      projectId: "project-1",
       projectPath: repoRoot,
       branch: { kind: "local", name: "feature/other" },
       bringChanges: false,
@@ -459,7 +499,7 @@ describe("DiffStore", () => {
     const store = new DiffStore(repoRoot)
     await store.initialize()
     const result = await store.createBranch({
-      chatId: "chat-1",
+      projectId: "project-1",
       projectPath: repoRoot,
       name: "feature/new",
       baseBranchName: "feature/base",
@@ -467,5 +507,107 @@ describe("DiffStore", () => {
 
     expect(result.ok).toBe(true)
     expect((await run(["git", "branch", "--show-current"], repoRoot)).trim()).toBe("feature/new")
+  })
+
+  test("previewMergeBranch reports up-to-date and mergeable states", async () => {
+    const repoRoot = await createRepo()
+    tempDirs.push(repoRoot)
+    await writeFile(path.join(repoRoot, "app.txt"), "base\n", "utf8")
+    await run(["git", "add", "."], repoRoot)
+    await run(["git", "commit", "-m", "init"], repoRoot)
+    await run(["git", "switch", "-c", "feature/preview"], repoRoot)
+
+    const store = new DiffStore(repoRoot)
+    await store.initialize()
+
+    const upToDatePreview = await store.previewMergeBranch({
+      projectPath: repoRoot,
+      branch: { kind: "local", name: "main" },
+    })
+
+    expect(upToDatePreview.status).toBe("up_to_date")
+    expect(upToDatePreview.commitCount).toBe(0)
+
+    await writeFile(path.join(repoRoot, "app.txt"), "feature\n", "utf8")
+    await run(["git", "commit", "-am", "feature"], repoRoot)
+    await run(["git", "switch", "main"], repoRoot)
+
+    const mergeablePreview = await store.previewMergeBranch({
+      projectPath: repoRoot,
+      branch: { kind: "local", name: "feature/preview" },
+    })
+
+    expect(mergeablePreview.status).toBe("mergeable")
+    expect(mergeablePreview.commitCount).toBe(1)
+    expect(mergeablePreview.hasConflicts).toBe(false)
+  })
+
+  test("previewMergeBranch detects likely conflicts", async () => {
+    const repoRoot = await createRepo()
+    tempDirs.push(repoRoot)
+    await writeFile(path.join(repoRoot, "conflict.txt"), "base\n", "utf8")
+    await run(["git", "add", "."], repoRoot)
+    await run(["git", "commit", "-m", "init"], repoRoot)
+    await run(["git", "switch", "-c", "feature/conflict"], repoRoot)
+    await writeFile(path.join(repoRoot, "conflict.txt"), "feature\n", "utf8")
+    await run(["git", "commit", "-am", "feature"], repoRoot)
+    await run(["git", "switch", "main"], repoRoot)
+    await writeFile(path.join(repoRoot, "conflict.txt"), "main\n", "utf8")
+    await run(["git", "commit", "-am", "main"], repoRoot)
+
+    const store = new DiffStore(repoRoot)
+    await store.initialize()
+
+    const preview = await store.previewMergeBranch({
+      projectPath: repoRoot,
+      branch: { kind: "local", name: "feature/conflict" },
+    })
+
+    expect(preview.status).toBe("conflicts")
+    expect(preview.hasConflicts).toBe(true)
+    expect(preview.commitCount).toBe(1)
+  })
+
+  test("mergeBranch blocks dirty worktrees and merges clean branches", async () => {
+    const repoRoot = await createRepo()
+    tempDirs.push(repoRoot)
+    await writeFile(path.join(repoRoot, "app.txt"), "base\n", "utf8")
+    await run(["git", "add", "."], repoRoot)
+    await run(["git", "commit", "-m", "init"], repoRoot)
+    await run(["git", "switch", "-c", "feature/merge"], repoRoot)
+    await writeFile(path.join(repoRoot, "app.txt"), "feature\n", "utf8")
+    await run(["git", "commit", "-am", "feature"], repoRoot)
+    await run(["git", "switch", "main"], repoRoot)
+    await writeFile(path.join(repoRoot, "scratch.txt"), "dirty\n", "utf8")
+
+    const store = new DiffStore(repoRoot)
+    await store.initialize()
+
+    const blockedResult = await store.mergeBranch({
+      projectId: "project-1",
+      projectPath: repoRoot,
+      branch: { kind: "local", name: "feature/merge" },
+    })
+
+    expect(blockedResult).toMatchObject({
+      ok: false,
+      title: "Merge blocked",
+      snapshotChanged: false,
+    })
+
+    await rm(path.join(repoRoot, "scratch.txt"))
+
+    const mergeResult = await store.mergeBranch({
+      projectId: "project-1",
+      projectPath: repoRoot,
+      branch: { kind: "local", name: "feature/merge" },
+    })
+
+    expect(mergeResult).toMatchObject({
+      ok: true,
+      snapshotChanged: true,
+    })
+    expect((await run(["git", "branch", "--show-current"], repoRoot)).trim()).toBe("main")
+    expect((await run(["git", "log", "--format=%s", "-1"], repoRoot)).trim()).toBe("feature")
   })
 })

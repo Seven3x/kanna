@@ -8,6 +8,8 @@ import type {
   ChatCheckoutBranchResult,
   ChatCreateBranchResult,
   ChatDiffSnapshot,
+  ChatMergeBranchResult,
+  ChatMergePreviewResult,
   ChatSyncResult,
   DiffCommitMode,
   DiffCommitResult,
@@ -49,6 +51,22 @@ const SCROLL_BUTTON_BOTTOM_PX = 120
 const DIFF_REFRESH_INTERVAL_MS = 5_000
 const EMPTY_DIFF_SNAPSHOT: ChatDiffSnapshot = { status: "unknown", files: [] }
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 12
+
+function serializeBranchSelection(branch: ChatBranchListEntry) {
+  return branch.kind === "local"
+    ? { kind: "local" as const, name: branch.name }
+    : branch.kind === "remote"
+      ? { kind: "remote" as const, name: branch.name, remoteRef: branch.remoteRef ?? branch.displayName }
+      : {
+          kind: "pull_request" as const,
+          name: branch.name,
+          prNumber: branch.prNumber ?? 0,
+          headRefName: branch.headRefName ?? branch.name,
+          headRepoCloneUrl: branch.headRepoCloneUrl,
+          isCrossRepository: branch.isCrossRepository,
+          remoteRef: branch.remoteRef,
+        }
+}
 
 function isInteractiveTranscriptRow(row: ResolvedTranscriptRow) {
   return row.kind === "single"
@@ -732,6 +750,18 @@ export function ChatPage() {
     void state.handleCopyPath(filePath)
   }, [state.handleCopyPath])
 
+  const handleLoadDiffPatch = useCallback(async (filePath: string) => {
+    if (!projectId) {
+      throw new Error("Project not found")
+    }
+    const result = await state.socket.command<{ patch: string }>({
+      type: "project.readDiffPatch",
+      projectId,
+      path: filePath,
+    })
+    return result.patch
+  }, [projectId, state.socket])
+
   const handleDiscardDiffFile = useCallback((filePath: string) => {
     const chatId = activeChatIdRef.current
     if (!chatId) return
@@ -902,19 +932,7 @@ export function ChatPage() {
       const result = await state.socket.command<ChatCheckoutBranchResult>({
         type: "chat.checkoutBranch",
         chatId,
-        branch: branch.kind === "local"
-          ? { kind: "local", name: branch.name }
-          : branch.kind === "remote"
-            ? { kind: "remote", name: branch.name, remoteRef: branch.remoteRef ?? branch.displayName }
-            : {
-                kind: "pull_request",
-                name: branch.name,
-                prNumber: branch.prNumber ?? 0,
-                headRefName: branch.headRefName ?? branch.name,
-                headRepoCloneUrl: branch.headRepoCloneUrl,
-                isCrossRepository: branch.isCrossRepository,
-                remoteRef: branch.remoteRef,
-              },
+        branch: serializeBranchSelection(branch),
         bringChanges,
       })
 
@@ -936,6 +954,61 @@ export function ChatPage() {
       })
     }
   }, [dialog, refreshDiffs, state.chatDiffSnapshot?.files.length, state.socket])
+
+  const handlePreviewMergeBranch = useCallback(async (branch: ChatBranchListEntry) => {
+    const chatId = activeChatIdRef.current
+    if (!chatId) {
+      return {
+        currentBranchName: undefined,
+        targetBranchName: branch.name,
+        targetDisplayName: branch.displayName,
+        status: "error",
+        commitCount: 0,
+        hasConflicts: false,
+        message: "Merge preview unavailable.",
+      } satisfies ChatMergePreviewResult
+    }
+
+    return await state.socket.command<ChatMergePreviewResult>({
+      type: "chat.previewMergeBranch",
+      chatId,
+      branch: serializeBranchSelection(branch),
+    })
+  }, [state.socket])
+
+  const handleMergeBranch = useCallback(async (branch: ChatBranchListEntry) => {
+    const chatId = activeChatIdRef.current
+    if (!chatId) {
+      return null
+    }
+
+    try {
+      const result = await state.socket.command<ChatMergeBranchResult>({
+        type: "chat.mergeBranch",
+        chatId,
+        branch: serializeBranchSelection(branch),
+      })
+
+      if (result.snapshotChanged) {
+        refreshDiffs()
+      }
+      if (!result.ok) {
+        await dialog.alert({
+          title: result.title,
+          description: `${result.message}${result.detail ? `\n\n${result.detail}` : ""}`,
+          closeLabel: "OK",
+        })
+      }
+      return result
+    } catch (error) {
+      await dialog.alert({
+        title: "Merge failed",
+        description: error instanceof Error ? error.message : String(error),
+        closeLabel: "OK",
+      })
+      return null
+    }
+  }, [dialog, refreshDiffs, state.socket])
 
   const handleCreateBranch = useCallback(async () => {
     const chatId = activeChatIdRef.current
@@ -959,13 +1032,13 @@ export function ChatPage() {
 
     let baseBranchName = defaultBranchName
     if (defaultBranchName && currentBranchName && defaultBranchName !== currentBranchName) {
-      const createFromDefault = await dialog.confirm({
+      const createFromCurrent = await dialog.confirm({
         title: "Branch Base",
-        description: `Create "${name}" from ${defaultBranchName} instead of ${currentBranchName}?`,
-        confirmLabel: `From ${defaultBranchName}`,
-        cancelLabel: `From ${currentBranchName}`,
+        description: `Create "${name}" from ${currentBranchName} instead of ${defaultBranchName}?`,
+        confirmLabel: `From ${currentBranchName}`,
+        cancelLabel: `From ${defaultBranchName}`,
       })
-      baseBranchName = createFromDefault ? defaultBranchName : currentBranchName
+      baseBranchName = createFromCurrent ? currentBranchName : defaultBranchName
     }
 
     try {
@@ -1481,7 +1554,10 @@ export function ChatPage() {
                 onIgnoreFile={handleIgnoreDiffFile}
                 onCopyFilePath={handleCopyDiffFilePath}
                 onCopyRelativePath={handleCopyDiffRelativePath}
+                onLoadPatch={handleLoadDiffPatch}
                 onListBranches={handleListBranches}
+                onPreviewMergeBranch={handlePreviewMergeBranch}
+                onMergeBranch={handleMergeBranch}
                 onCheckoutBranch={handleCheckoutBranch}
                 onCreateBranch={handleCreateBranch}
                 onGenerateCommitMessage={handleGenerateCommitMessage}

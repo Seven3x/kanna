@@ -38,6 +38,9 @@ describe("normalizeKeybindings", () => {
       openInFinder: ["Cmd+Alt+F"],
       openInEditor: ["Cmd+Shift+O"],
       addSplitTerminal: ["Cmd+Shift+J"],
+      jumpToSidebarChat: ["Cmd+Alt"],
+      createChatInCurrentProject: ["Cmd+Alt+N"],
+      openAddProject: ["Cmd+Alt+O"],
     }, TEST_FILE_PATH)
 
     expect(snapshot).toEqual({
@@ -47,6 +50,9 @@ describe("normalizeKeybindings", () => {
         openInFinder: ["cmd+alt+f"],
         openInEditor: ["cmd+shift+o"],
         addSplitTerminal: ["cmd+shift+j"],
+        jumpToSidebarChat: ["cmd+alt"],
+        createChatInCurrentProject: ["cmd+alt+n"],
+        openAddProject: ["cmd+alt+o"],
       },
       warning: null,
       filePathDisplay: TEST_FILE_PATH,
@@ -97,6 +103,9 @@ describe("KeybindingsManager", () => {
       openInFinder: ["Cmd+Alt+F"],
       openInEditor: ["Cmd+Shift+O"],
       addSplitTerminal: ["Cmd+Shift+J"],
+      jumpToSidebarChat: ["Cmd+Alt"],
+      createChatInCurrentProject: ["Cmd+Alt+N"],
+      openAddProject: ["Cmd+Alt+O"],
     })
 
     expect(snapshot).toEqual({
@@ -106,6 +115,9 @@ describe("KeybindingsManager", () => {
         openInFinder: ["cmd+alt+f"],
         openInEditor: ["cmd+shift+o"],
         addSplitTerminal: ["cmd+shift+j"],
+        jumpToSidebarChat: ["cmd+alt"],
+        createChatInCurrentProject: ["cmd+alt+n"],
+        openAddProject: ["cmd+alt+o"],
       },
       warning: null,
       filePathDisplay: filePath,

@@ -66,8 +66,7 @@ describe("read models", () => {
           olderCursor: null,
           recentLimit: 200,
         },
-      }),
-      () => ({ status: "unknown", files: [] })
+      })
     )
     expect(chat?.runtime.provider).toBe("claude")
     expect(chat?.history.recentLimit).toBe(200)

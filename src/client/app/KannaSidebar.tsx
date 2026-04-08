@@ -6,9 +6,17 @@ import { Button } from "../components/ui/button"
 import { cn } from "../lib/utils"
 import { ChatRow } from "../components/chat-ui/sidebar/ChatRow"
 import { LocalProjectsSection } from "../components/chat-ui/sidebar/LocalProjectsSection"
-import type { SidebarData, SidebarChatRow, UpdateSnapshot } from "../../shared/types"
+import { getResolvedKeybindings } from "../lib/keybindings"
+import type { KeybindingsSnapshot, SidebarData, SidebarChatRow, UpdateSnapshot } from "../../shared/types"
 import type { SocketStatus } from "./socket"
 import { useProjectGroupOrderStore } from "../stores/projectGroupOrderStore"
+import {
+  getSidebarJumpTargetIndex,
+  getSidebarNumberJumpHint,
+  getVisibleSidebarChats,
+  isSidebarModifierShortcut,
+  shouldShowSidebarNumberJumpHints,
+} from "./sidebarNumberJump"
 
 interface KannaSidebarProps {
   data: SidebarData
@@ -23,7 +31,10 @@ interface KannaSidebarProps {
   onCollapse: () => void
   onExpand: () => void
   onCreateChat: (projectId: string) => void
+  currentProjectId: string | null
+  keybindings: KeybindingsSnapshot | null
   onDeleteChat: (chat: SidebarChatRow) => void
+  onOpenAddProjectModal: () => void
   onCopyPath: (localPath: string) => void
   onOpenExternalPath: (action: "open_finder" | "open_editor", localPath: string) => void
   onRemoveProject: (projectId: string) => void
@@ -45,7 +56,10 @@ function KannaSidebarImpl({
   onCollapse,
   onExpand,
   onCreateChat,
+  currentProjectId,
+  keybindings,
   onDeleteChat,
+  onOpenAddProjectModal,
   onCopyPath,
   onOpenExternalPath,
   onRemoveProject,
@@ -59,7 +73,9 @@ function KannaSidebarImpl({
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [showNumberJumpHints, setShowNumberJumpHints] = useState(false)
   const chatsPerProject = 10
+  const resolvedKeybindings = useMemo(() => getResolvedKeybindings(keybindings), [keybindings])
 
   const savedOrder = useProjectGroupOrderStore((s) => s.order)
   const setGroupOrder = useProjectGroupOrderStore((s) => s.setOrder)
@@ -83,16 +99,21 @@ function KannaSidebarImpl({
     (newOrder: string[]) => setGroupOrder(newOrder),
     [setGroupOrder]
   )
+  const visibleChats = useMemo(
+    () => getVisibleSidebarChats(orderedProjectGroups, collapsedSections, expandedGroups, chatsPerProject),
+    [chatsPerProject, collapsedSections, expandedGroups, orderedProjectGroups]
+  )
+  const visibleIndexByChatId = useMemo(
+    () => new Map(visibleChats.map((entry) => [entry.chat.chatId, entry.visibleIndex])),
+    [visibleChats]
+  )
 
   const projectIdByPath = useMemo(
     () => new Map(data.projectGroups.map((group) => [group.localPath, group.groupKey])),
     [data.projectGroups]
   )
 
-  const activeVisibleCount = useMemo(
-    () => data.projectGroups.reduce((count, group) => count + group.chats.length, 0),
-    [data.projectGroups]
-  )
+  const activeVisibleCount = visibleChats.length
 
   const toggleSection = useCallback((key: string) => {
     setCollapsedSections((previous) => {
@@ -115,19 +136,25 @@ function KannaSidebarImpl({
     })
   }, [])
 
-  const renderChatRow = useCallback((chat: SidebarChatRow) => (
-    <ChatRow
-      key={chat._id}
-      chat={chat}
-      activeChatId={activeChatId}
-      nowMs={nowMs}
-      onSelectChat={(chatId) => {
-        navigate(`/chat/${chatId}`)
-        onClose()
-      }}
-      onDeleteChat={() => onDeleteChat(chat)}
-    />
-  ), [activeChatId, navigate, nowMs, onClose, onDeleteChat])
+  const renderChatRow = useCallback((chat: SidebarChatRow) => {
+    const visibleIndex = visibleIndexByChatId.get(chat.chatId)
+
+    return (
+      <ChatRow
+        key={chat._id}
+        chat={chat}
+        activeChatId={activeChatId}
+        nowMs={nowMs}
+        shortcutHint={visibleIndex ? getSidebarNumberJumpHint(resolvedKeybindings, visibleIndex) : null}
+        showShortcutHint={showNumberJumpHints}
+        onSelectChat={(chatId) => {
+          navigate(`/chat/${chatId}`)
+          onClose()
+        }}
+        onDeleteChat={() => onDeleteChat(chat)}
+      />
+    )
+  }, [activeChatId, navigate, nowMs, onClose, onDeleteChat, resolvedKeybindings, showNumberJumpHints, visibleIndexByChatId])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -136,6 +163,62 @@ function KannaSidebarImpl({
 
     return () => window.clearInterval(intervalId)
   }, [])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      setShowNumberJumpHints(shouldShowSidebarNumberJumpHints(resolvedKeybindings, event))
+
+      if (isSidebarModifierShortcut(resolvedKeybindings, "createChatInCurrentProject", event)) {
+        if (!currentProjectId) {
+          return
+        }
+
+        event.preventDefault()
+        onCreateChat(currentProjectId)
+        return
+      }
+
+      if (isSidebarModifierShortcut(resolvedKeybindings, "openAddProject", event)) {
+        event.preventDefault()
+        navigate("/")
+        onClose()
+        onOpenAddProjectModal()
+        return
+      }
+
+      const targetIndex = getSidebarJumpTargetIndex(resolvedKeybindings, event)
+      if (targetIndex === null) {
+        return
+      }
+
+      const targetChat = visibleChats[targetIndex - 1]?.chat
+      if (!targetChat) {
+        return
+      }
+
+      event.preventDefault()
+      navigate(`/chat/${targetChat.chatId}`)
+      onClose()
+    }
+
+    function handleKeyUp(event: KeyboardEvent) {
+      setShowNumberJumpHints(shouldShowSidebarNumberJumpHints(resolvedKeybindings, event))
+    }
+
+    function clearHints() {
+      setShowNumberJumpHints(false)
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    window.addEventListener("keyup", handleKeyUp)
+    window.addEventListener("blur", clearHints)
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("keyup", handleKeyUp)
+      window.removeEventListener("blur", clearHints)
+    }
+  }, [currentProjectId, navigate, onClose, onCreateChat, onOpenAddProjectModal, resolvedKeybindings, visibleChats])
 
   useEffect(() => {
     if (!activeChatId || !scrollContainerRef.current) return

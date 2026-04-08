@@ -28,6 +28,8 @@ interface LocalDevProps {
   snapshot: LocalProjectsSnapshot | null
   startingLocalPath: string | null
   commandError: string | null
+  newProjectOpen: boolean
+  onNewProjectOpenChange: (open: boolean) => void
   onOpenProject: (localPath: string) => Promise<void>
   onCreateProject: (project: { mode: "new" | "existing"; localPath: string; title: string }) => Promise<void>
 }
@@ -169,11 +171,11 @@ export function LocalDev({
   snapshot,
   startingLocalPath,
   commandError,
+  newProjectOpen,
+  onNewProjectOpenChange,
   onOpenProject,
   onCreateProject,
 }: LocalDevProps) {
-  const [newProjectOpen, setNewProjectOpen] = useState(false)
-
   const projects = useMemo(() => snapshot?.projects ?? [], [snapshot?.projects])
   const isConnecting = connectionStatus === "connecting" || !ready
   const isConnected = connectionStatus === "connected" && ready
@@ -268,7 +270,7 @@ export function LocalDev({
           <div className="w-full px-6 mb-10">
             <div className="flex items-baseline justify-between mb-3">
               <h2 className="text-[13px] font-medium text-muted-foreground uppercase tracking-wider">Projects</h2>
-              <Button variant="default" size="sm" onClick={() => setNewProjectOpen(true)}>
+              <Button variant="default" size="sm" onClick={() => onNewProjectOpenChange(true)}>
                 <Plus className="h-4 w-4 mr-1.5" />
                 Add Project
               </Button>
@@ -304,7 +306,7 @@ export function LocalDev({
 
       <NewProjectModal
         open={newProjectOpen}
-        onOpenChange={setNewProjectOpen}
+        onOpenChange={onNewProjectOpenChange}
         onConfirm={(project) => {
           void onCreateProject(project)
         }}

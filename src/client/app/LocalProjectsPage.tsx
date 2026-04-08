@@ -13,6 +13,14 @@ export function LocalProjectsPage() {
         snapshot={state.localProjects}
         startingLocalPath={state.startingLocalPath}
         commandError={state.commandError}
+        newProjectOpen={state.addProjectModalOpen}
+        onNewProjectOpenChange={(open) => {
+          if (open) {
+            state.openAddProjectModal()
+            return
+          }
+          state.closeAddProjectModal()
+        }}
         onOpenProject={state.handleOpenLocalProject}
         onCreateProject={state.handleCreateProject}
       />

@@ -207,7 +207,6 @@ describe("getActiveChatSnapshot", () => {
         olderCursor: null,
         recentLimit: 200,
       },
-      diffs: { status: "unknown", files: [] },
       availableProviders: [],
     }
 
@@ -233,7 +232,6 @@ describe("getActiveChatSnapshot", () => {
         olderCursor: null,
         recentLimit: 200,
       },
-      diffs: { status: "unknown", files: [] },
       availableProviders: [],
     }
 

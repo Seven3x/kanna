@@ -22,7 +22,7 @@ export interface ClientState {
 
 interface CreateWsRouterArgs {
   store: EventStore
-  diffStore?: Pick<DiffStore, "getSnapshot" | "refreshSnapshot" | "listBranches" | "syncBranch" | "checkoutBranch" | "createBranch" | "generateCommitMessage" | "commitFiles" | "discardFile" | "ignoreFile">
+  diffStore?: Pick<DiffStore, "getProjectSnapshot" | "refreshSnapshot" | "listBranches" | "previewMergeBranch" | "mergeBranch" | "syncBranch" | "checkoutBranch" | "createBranch" | "generateCommitMessage" | "commitFiles" | "discardFile" | "ignoreFile" | "readPatch">
   agent: AgentCoordinator
   terminals: TerminalManager
   keybindings: KeybindingsManager
@@ -57,9 +57,11 @@ export function createWsRouter({
 }: CreateWsRouterArgs) {
   const sockets = new Set<ServerWebSocket<ClientState>>()
   const resolvedDiffStore = diffStore ?? {
-    getSnapshot: () => ({ status: "unknown", branchName: undefined, defaultBranchName: undefined, originRepoSlug: undefined, hasUpstream: undefined, aheadCount: undefined, behindCount: undefined, lastFetchedAt: undefined, files: [] as const, branchHistory: { entries: [] as const } }),
+    getProjectSnapshot: () => ({ status: "unknown", branchName: undefined, defaultBranchName: undefined, originRepoSlug: undefined, hasUpstream: undefined, aheadCount: undefined, behindCount: undefined, lastFetchedAt: undefined, files: [] as const, branchHistory: { entries: [] as const } }),
     refreshSnapshot: async () => false,
     listBranches: async () => ({ recent: [], local: [], remote: [], pullRequests: [], pullRequestsStatus: "unavailable" as const }),
+    previewMergeBranch: async () => ({ currentBranchName: undefined, targetBranchName: "", targetDisplayName: "", status: "error" as const, commitCount: 0, hasConflicts: false, message: "Merge preview unavailable." }),
+    mergeBranch: async () => ({ ok: false as const, title: "Merge failed", message: "Merge unavailable.", snapshotChanged: false }),
     syncBranch: async () => ({ ok: true, action: "fetch" as const, branchName: undefined, snapshotChanged: false }),
     checkoutBranch: async () => ({ ok: true, branchName: undefined, snapshotChanged: false }),
     createBranch: async () => ({ ok: true, branchName: "main", snapshotChanged: false }),
@@ -67,6 +69,7 @@ export function createWsRouter({
     commitFiles: async () => ({ ok: true, mode: "commit_only" as const, branchName: undefined, pushed: false, snapshotChanged: false }),
     discardFile: async () => ({ snapshotChanged: false }),
     ignoreFile: async () => ({ snapshotChanged: false }),
+    readPatch: async () => ({ patch: "" }),
   }
 
   function createEnvelope(id: string, topic: SubscriptionTopic): ServerEnvelope {
@@ -141,6 +144,20 @@ export function createWsRouter({
       }
     }
 
+    if (topic.type === "project-git") {
+      return {
+        v: PROTOCOL_VERSION,
+        type: "snapshot",
+        id,
+        snapshot: {
+          type: "project-git",
+          data: store.getProject(topic.projectId)
+            ? resolvedDiffStore.getProjectSnapshot(topic.projectId)
+            : null,
+        },
+      }
+    }
+
     return {
       v: PROTOCOL_VERSION,
       type: "snapshot",
@@ -152,8 +169,7 @@ export function createWsRouter({
           agent.getActiveStatuses(),
           agent.getDrainingChatIds(),
           topic.chatId,
-          (chatId) => store.getRecentChatHistory(chatId, topic.recentLimit ?? DEFAULT_CHAT_RECENT_LIMIT),
-          (chatId) => resolvedDiffStore.getSnapshot(chatId)
+          (chatId) => store.getRecentChatHistory(chatId, topic.recentLimit ?? DEFAULT_CHAT_RECENT_LIMIT)
         ),
       },
     }
@@ -334,6 +350,18 @@ export function createWsRouter({
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
           break
         }
+        case "project.readDiffPatch": {
+          const project = store.getProject(command.projectId)
+          if (!project) {
+            throw new Error("Project not found")
+          }
+          const result = await resolvedDiffStore.readPatch({
+            projectPath: project.localPath,
+            path: command.path,
+          })
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result })
+          return
+        }
         case "system.openExternal": {
           await openExternal(command)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
@@ -368,7 +396,7 @@ export function createWsRouter({
         }
         case "chat.refreshDiffs": {
           const { project } = resolveChatProject(command.chatId)
-          const changed = await resolvedDiffStore.refreshSnapshot(command.chatId, project.localPath)
+          const changed = await resolvedDiffStore.refreshSnapshot(project.id, project.localPath)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
           if (changed) {
             broadcastSnapshots()
@@ -383,10 +411,32 @@ export function createWsRouter({
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result })
           return
         }
+        case "chat.previewMergeBranch": {
+          const { project } = resolveChatProject(command.chatId)
+          const result = await resolvedDiffStore.previewMergeBranch({
+            projectPath: project.localPath,
+            branch: command.branch,
+          })
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result })
+          return
+        }
+        case "chat.mergeBranch": {
+          const { project } = resolveChatProject(command.chatId)
+          const result = await resolvedDiffStore.mergeBranch({
+            projectId: project.id,
+            projectPath: project.localPath,
+            branch: command.branch,
+          })
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result })
+          if (result.snapshotChanged) {
+            broadcastSnapshots()
+          }
+          return
+        }
         case "chat.checkoutBranch": {
           const { project } = resolveChatProject(command.chatId)
           const result = await resolvedDiffStore.checkoutBranch({
-            chatId: command.chatId,
+            projectId: project.id,
             projectPath: project.localPath,
             branch: command.branch,
             bringChanges: command.bringChanges,
@@ -400,7 +450,7 @@ export function createWsRouter({
         case "chat.syncBranch": {
           const { project } = resolveChatProject(command.chatId)
           const result = await resolvedDiffStore.syncBranch({
-            chatId: command.chatId,
+            projectId: project.id,
             projectPath: project.localPath,
             action: command.action,
           })
@@ -413,7 +463,7 @@ export function createWsRouter({
         case "chat.createBranch": {
           const { project } = resolveChatProject(command.chatId)
           const result = await resolvedDiffStore.createBranch({
-            chatId: command.chatId,
+            projectId: project.id,
             projectPath: project.localPath,
             name: command.name,
             baseBranchName: command.baseBranchName,
@@ -436,7 +486,7 @@ export function createWsRouter({
         case "chat.commitDiffs": {
           const { project } = resolveChatProject(command.chatId)
           const result = await resolvedDiffStore.commitFiles({
-            chatId: command.chatId,
+            projectId: project.id,
             projectPath: project.localPath,
             paths: command.paths,
             summary: command.summary,
@@ -452,7 +502,7 @@ export function createWsRouter({
         case "chat.discardDiffFile": {
           const { project } = resolveChatProject(command.chatId)
           const result = await resolvedDiffStore.discardFile({
-            chatId: command.chatId,
+            projectId: project.id,
             projectPath: project.localPath,
             path: command.path,
           })
@@ -465,7 +515,7 @@ export function createWsRouter({
         case "chat.ignoreDiffFile": {
           const { project } = resolveChatProject(command.chatId)
           const result = await resolvedDiffStore.ignoreFile({
-            chatId: command.chatId,
+            projectId: project.id,
             projectPath: project.localPath,
             path: command.path,
           })

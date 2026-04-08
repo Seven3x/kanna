@@ -296,6 +296,7 @@
     --diffs-dark-bg: hsl(var(--background)) !important;
     --diffs-gap-block: 0px !important;
     --diffs-bg-separator: hsl(var(--background)) !important;
+    --diffs-font-size: 11px;
   }
 
   [data-panel][data-terminal-open] {

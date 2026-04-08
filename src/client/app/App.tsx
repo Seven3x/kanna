@@ -31,6 +31,9 @@ function KannaLayout() {
   const handleSidebarCreateChat = useCallback((projectId: string) => {
     void state.handleCreateChat(projectId)
   }, [state.handleCreateChat])
+  const handleOpenAddProjectModal = useCallback(() => {
+    state.openAddProjectModal()
+  }, [state])
   const handleSidebarDeleteChat = useCallback((chat: Parameters<typeof state.handleDeleteChat>[0]) => {
     void state.handleDeleteChat(chat)
   }, [state.handleDeleteChat])
@@ -60,7 +63,10 @@ function KannaLayout() {
       onCollapse={state.collapseSidebar}
       onExpand={state.expandSidebar}
       onCreateChat={handleSidebarCreateChat}
+      currentProjectId={state.activeProjectId}
+      keybindings={state.keybindings}
       onDeleteChat={handleSidebarDeleteChat}
+      onOpenAddProjectModal={handleOpenAddProjectModal}
       onCopyPath={handleSidebarCopyPath}
       onOpenExternalPath={handleSidebarOpenExternalPath}
       onRemoveProject={handleSidebarRemoveProject}
@@ -70,6 +76,7 @@ function KannaLayout() {
     />
   ), [
     handleInstallUpdate,
+    handleOpenAddProjectModal,
     handleSidebarCopyPath,
     handleSidebarCreateChat,
     handleSidebarDeleteChat,
@@ -77,6 +84,8 @@ function KannaLayout() {
     handleSidebarRemoveProject,
     showMobileOpenButton,
     state.activeChatId,
+    state.activeProjectId,
+    state.keybindings,
     state.closeSidebar,
     state.collapseSidebar,
     state.connectionStatus,

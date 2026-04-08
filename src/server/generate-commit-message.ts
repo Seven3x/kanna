@@ -1,6 +1,11 @@
 import path from "node:path"
-import type { ChatDiffFile } from "../shared/types"
 import { QuickResponseAdapter } from "./quick-response"
+
+interface CommitMessageFile {
+  path: string
+  changeType: "added" | "deleted" | "modified" | "renamed"
+  patch: string
+}
 
 const COMMIT_MESSAGE_SCHEMA = {
   type: "object",
@@ -44,7 +49,7 @@ function sanitizeBody(value: unknown): string {
   return value.trim()
 }
 
-function fallbackSubject(files: ChatDiffFile[]) {
+function fallbackSubject(files: CommitMessageFile[]) {
   if (files.length === 1) {
     const fileName = path.posix.basename(files[0]?.path ?? "file")
     const normalized = `Update ${fileName}`.replace(/\s+/g, " ").trim()
@@ -56,7 +61,7 @@ function fallbackSubject(files: ChatDiffFile[]) {
 
 function buildCommitMessagePrompt(args: {
   branchName?: string
-  files: ChatDiffFile[]
+  files: CommitMessageFile[]
 }) {
   const fileList = args.files.map((file) => `${file.changeType}: ${file.path}`).join("\n")
   const combinedPatch = args.files.map((file) => file.patch).join("\n\n")
@@ -83,7 +88,7 @@ export async function generateCommitMessageDetailed(
   args: {
     cwd: string
     branchName?: string
-    files: ChatDiffFile[]
+    files: CommitMessageFile[]
   },
   adapter = new QuickResponseAdapter()
 ): Promise<GenerateCommitMessageResult> {

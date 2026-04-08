@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -11,6 +12,8 @@ import type {
   ChatCreateBranchResult,
   ChatDiffFile,
   ChatDiffSnapshot,
+  ChatMergeBranchResult,
+  ChatMergePreviewResult,
   ChatSyncResult,
   DiffCommitMode,
   DiffCommitResult,
@@ -83,7 +86,12 @@ function snapshotsEqual(left: StoredChatDiffState | undefined, right: StoredChat
     return Boolean(other)
       && file.path === other.path
       && file.changeType === other.changeType
-      && file.patch === other.patch
+      && file.isUntracked === other.isUntracked
+      && file.additions === other.additions
+      && file.deletions === other.deletions
+      && file.patchDigest === other.patchDigest
+      && file.mimeType === other.mimeType
+      && file.size === other.size
   })
 }
 
@@ -93,6 +101,19 @@ interface DirtyPathEntry {
   changeType: ChatDiffFile["changeType"]
   isUntracked: boolean
 }
+
+type SelectedBranch =
+  | { kind: "local"; name: string }
+  | { kind: "remote"; name: string; remoteRef: string }
+  | {
+      kind: "pull_request"
+      name: string
+      prNumber: number
+      headRefName: string
+      headRepoCloneUrl?: string
+      isCrossRepository?: boolean
+      remoteRef?: string
+    }
 
 async function fileExists(filePath: string) {
   try {
@@ -372,6 +393,89 @@ async function getRecentBranchNames(repoRoot: string) {
   return recent
 }
 
+async function resolveSelectedBranchRef(repoRoot: string, branch: SelectedBranch) {
+  if (branch.kind === "local") {
+    const localBranchNames = await getLocalBranchNames(repoRoot)
+    if (!localBranchNames.includes(branch.name)) {
+      throw new Error(`Local branch not found: ${branch.name}`)
+    }
+    return {
+      ref: branch.name,
+      displayName: branch.name,
+      branchName: branch.name,
+    }
+  }
+
+  if (branch.kind === "remote") {
+    const remoteRef = branch.remoteRef.trim()
+    const remoteBranchNames = await getRemoteBranchNames(repoRoot)
+    if (!remoteBranchNames.includes(remoteRef)) {
+      throw new Error(`Remote branch not found: ${remoteRef}`)
+    }
+    return {
+      ref: remoteRef,
+      displayName: remoteRef,
+      branchName: branch.name,
+    }
+  }
+
+  const localBranchNames = await getLocalBranchNames(repoRoot)
+  if (localBranchNames.includes(branch.name)) {
+    return {
+      ref: branch.name,
+      displayName: `PR #${branch.prNumber}`,
+      branchName: branch.name,
+    }
+  }
+
+  const remoteRef = branch.remoteRef?.trim()
+  if (remoteRef) {
+    const remoteBranchNames = await getRemoteBranchNames(repoRoot)
+    if (remoteBranchNames.includes(remoteRef)) {
+      return {
+        ref: remoteRef,
+        displayName: `PR #${branch.prNumber}`,
+        branchName: branch.headRefName || branch.name,
+      }
+    }
+  }
+
+  if (branch.isCrossRepository) {
+    throw new Error("This pull request branch is not available locally yet. Check it out first before merging.")
+  }
+
+  throw new Error(`Pull request branch not found: ${branch.headRefName || branch.name}`)
+}
+
+async function getMergeCommitCount(repoRoot: string, sourceRef: string) {
+  const result = await runGit(["rev-list", "--count", `HEAD..${sourceRef}`], repoRoot)
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || "Failed to calculate merge commit count")
+  }
+
+  const commitCount = Number.parseInt(result.stdout.trim(), 10)
+  return Number.isFinite(commitCount) ? commitCount : 0
+}
+
+async function predictMergeConflicts(repoRoot: string, sourceRef: string) {
+  const result = await runGit(["merge-tree", "--write-tree", "--messages", "HEAD", sourceRef], repoRoot)
+  const output = `${result.stdout}\n${result.stderr}`.trim()
+
+  if (result.exitCode === 0) {
+    return { hasConflicts: false }
+  }
+
+  const normalizedOutput = output.toLowerCase()
+  if (result.exitCode === 1 || normalizedOutput.includes("conflict")) {
+    return {
+      hasConflicts: true,
+      detail: output || "Git reported merge conflicts for this branch pair.",
+    }
+  }
+
+  throw new Error(output || "Failed to analyze merge conflicts")
+}
+
 export function extractGitHubRepoSlug(remoteUrl: string | null | undefined) {
   if (!remoteUrl) return null
 
@@ -563,6 +667,21 @@ function createBranchActionFailure(title: string, detail: string, fallback: stri
   } as const
 }
 
+function createMergeActionFailure(args: {
+  title: string
+  detail: string
+  fallback: string
+  snapshotChanged: boolean
+}) {
+  return {
+    ok: false,
+    title: args.title,
+    message: summarizeGitFailure(args.detail, args.fallback),
+    detail: args.detail,
+    snapshotChanged: args.snapshotChanged,
+  } as const
+}
+
 function parseStatusPaths(output: string): DirtyPathEntry[] {
   const entries: DirtyPathEntry[] = []
   for (const rawLine of output.split(/\r?\n/u)) {
@@ -673,8 +792,83 @@ async function createPatch(beforePathLabel: string, afterPathLabel: string, befo
   }
 }
 
+function getContentDigest(args: {
+  changeType: ChatDiffFile["changeType"]
+  beforePath: string
+  afterPath: string
+  beforeText: string | null
+  afterText: string | null
+}) {
+  return createHash("sha1")
+    .update(args.changeType)
+    .update("\u0000")
+    .update(args.beforePath)
+    .update("\u0000")
+    .update(args.afterPath)
+    .update("\u0000")
+    .update(args.beforeText ?? "")
+    .update("\u0000")
+    .update(args.afterText ?? "")
+    .digest("hex")
+}
+
+function parseNumstatValue(value: string) {
+  if (value === "-" || value.trim() === "") return 0
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function countTextLines(text: string | null) {
+  if (!text) return 0
+  const lines = text.split(/\r?\n/u)
+  if (lines.at(-1) === "") {
+    lines.pop()
+  }
+  return lines.length
+}
+
+async function getTrackedDiffStats(repoRoot: string, baseCommit: string | null) {
+  const statsByPath = new Map<string, { additions: number; deletions: number }>()
+  if (!baseCommit) {
+    return statsByPath
+  }
+
+  const result = await runGit(["diff", "--numstat", "-z", "-M", baseCommit], repoRoot)
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || "Failed to read git diff stats")
+  }
+
+  const tokens = result.stdout.split("\u0000")
+  for (let index = 0; index < tokens.length;) {
+    const header = tokens[index++] ?? ""
+    if (!header) continue
+
+    const [additionsValue, deletionsValue, pathValue = ""] = header.split("\t")
+    if (typeof additionsValue !== "string" || typeof deletionsValue !== "string") continue
+
+    if (pathValue) {
+      statsByPath.set(pathValue, {
+        additions: parseNumstatValue(additionsValue),
+        deletions: parseNumstatValue(deletionsValue),
+      })
+      continue
+    }
+
+    index += 1
+    const nextPath = tokens[index++] ?? ""
+    if (!nextPath) continue
+    statsByPath.set(nextPath, {
+      additions: parseNumstatValue(additionsValue),
+      deletions: parseNumstatValue(deletionsValue),
+    })
+  }
+
+  return statsByPath
+}
+
 async function computeCurrentFiles(repoRoot: string, baseCommit: string | null): Promise<ChatDiffFile[]> {
   const currentDirtyPaths = await listDirtyPaths(repoRoot)
+  const trackedStatsByPath = await getTrackedDiffStats(repoRoot, baseCommit)
   const files: ChatDiffFile[] = []
 
   for (const entry of currentDirtyPaths) {
@@ -692,12 +886,22 @@ async function computeCurrentFiles(repoRoot: string, baseCommit: string | null):
       continue
     }
 
-    const patch = await createPatch(beforePath, relativePath, beforeText, afterText)
+    const trackedStats = trackedStatsByPath.get(relativePath)
+    const additions = trackedStats?.additions ?? countTextLines(afterText)
+    const deletions = trackedStats?.deletions ?? 0
     files.push({
       path: relativePath,
       changeType: entry.changeType,
       isUntracked: entry.isUntracked,
-      patch,
+      additions,
+      deletions,
+      patchDigest: getContentDigest({
+        changeType: entry.changeType,
+        beforePath,
+        afterPath: relativePath,
+        beforeText,
+        afterText,
+      }),
       mimeType,
       size,
     })
@@ -779,8 +983,31 @@ export class DiffStore {
 
   async initialize() {}
 
-  getSnapshot(chatId: string): ChatDiffSnapshot {
-    const state = this.states.get(chatId) ?? createEmptyState()
+  async readPatch(args: {
+    projectPath: string
+    path: string
+  }) {
+    const relativePath = normalizeRepoRelativePath(args.path)
+    const repo = await resolveRepo(args.projectPath)
+    if (!repo) {
+      throw new Error("Project is not in a git repository")
+    }
+
+    const entry = await findDirtyPath(repo.repoRoot, relativePath)
+    if (!entry) {
+      throw new Error(`File is no longer changed: ${relativePath}`)
+    }
+
+    const beforePath = entry.previousPath ?? relativePath
+    const beforeText = await readBaseFile(repo.repoRoot, repo.baseCommit, beforePath)
+    const afterText = await readWorktreeFile(repo.repoRoot, relativePath)
+    const patch = await createPatch(beforePath, relativePath, beforeText, afterText)
+
+    return { patch }
+  }
+
+  getProjectSnapshot(projectId: string): ChatDiffSnapshot {
+    const state = this.states.get(projectId) ?? createEmptyState()
     return {
       status: state.status,
       branchName: state.branchName,
@@ -800,7 +1027,7 @@ export class DiffStore {
     }
   }
 
-  async refreshSnapshot(chatId: string, projectPath: string) {
+  async refreshSnapshot(projectId: string, projectPath: string) {
     const repo = await resolveRepo(projectPath)
     if (!repo) {
       const nextState = {
@@ -815,8 +1042,8 @@ export class DiffStore {
         files: [],
         branchHistory: { entries: [] },
       } satisfies StoredChatDiffState
-      const changed = !snapshotsEqual(this.states.get(chatId), nextState)
-      this.states.set(chatId, nextState)
+      const changed = !snapshotsEqual(this.states.get(projectId), nextState)
+      this.states.set(projectId, nextState)
       return changed
     }
 
@@ -849,8 +1076,8 @@ export class DiffStore {
       files,
       branchHistory,
     } satisfies StoredChatDiffState
-    const changed = !snapshotsEqual(this.states.get(chatId), nextState)
-    this.states.set(chatId, nextState)
+    const changed = !snapshotsEqual(this.states.get(projectId), nextState)
+    this.states.set(projectId, nextState)
     return changed
   }
 
@@ -998,21 +1225,145 @@ export class DiffStore {
     }
   }
 
-  async checkoutBranch(args: {
-    chatId: string
+  async previewMergeBranch(args: {
     projectPath: string
-    branch:
-    | { kind: "local"; name: string }
-    | { kind: "remote"; name: string; remoteRef: string }
-    | {
-        kind: "pull_request"
-        name: string
-        prNumber: number
-        headRefName: string
-        headRepoCloneUrl?: string
-        isCrossRepository?: boolean
-        remoteRef?: string
+    branch: SelectedBranch
+  }): Promise<ChatMergePreviewResult> {
+    const repo = await resolveRepo(args.projectPath)
+    if (!repo) {
+      throw new Error("Project is not in a git repository")
+    }
+
+    const currentBranchName = await getBranchName(repo.repoRoot)
+    const resolvedBranch = await resolveSelectedBranchRef(repo.repoRoot, args.branch)
+
+    if (currentBranchName && resolvedBranch.branchName === currentBranchName) {
+      return {
+        currentBranchName,
+        targetBranchName: resolvedBranch.branchName,
+        targetDisplayName: resolvedBranch.displayName,
+        status: "up_to_date",
+        commitCount: 0,
+        hasConflicts: false,
+        message: `${currentBranchName} is already up to date with ${resolvedBranch.displayName}.`,
       }
+    }
+
+    try {
+      const commitCount = await getMergeCommitCount(repo.repoRoot, resolvedBranch.ref)
+      if (commitCount === 0) {
+        return {
+          currentBranchName,
+          targetBranchName: resolvedBranch.branchName,
+          targetDisplayName: resolvedBranch.displayName,
+          status: "up_to_date",
+          commitCount,
+          hasConflicts: false,
+          message: `${currentBranchName ?? "Current branch"} is already up to date with ${resolvedBranch.displayName}.`,
+        }
+      }
+
+      const conflictPrediction = await predictMergeConflicts(repo.repoRoot, resolvedBranch.ref)
+      if (conflictPrediction.hasConflicts) {
+        return {
+          currentBranchName,
+          targetBranchName: resolvedBranch.branchName,
+          targetDisplayName: resolvedBranch.displayName,
+          status: "conflicts",
+          commitCount,
+          hasConflicts: true,
+          message: `${commitCount} ${commitCount === 1 ? "commit" : "commits"} from ${resolvedBranch.displayName} would merge into ${currentBranchName ?? "the current branch"}, but conflicts are expected.`,
+          detail: conflictPrediction.detail,
+        }
+      }
+
+      return {
+        currentBranchName,
+        targetBranchName: resolvedBranch.branchName,
+        targetDisplayName: resolvedBranch.displayName,
+        status: "mergeable",
+        commitCount,
+        hasConflicts: false,
+        message: `${commitCount} ${commitCount === 1 ? "commit" : "commits"} from ${resolvedBranch.displayName} will merge into ${currentBranchName ?? "the current branch"}.`,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return {
+        currentBranchName,
+        targetBranchName: resolvedBranch.branchName,
+        targetDisplayName: resolvedBranch.displayName,
+        status: "error",
+        commitCount: 0,
+        hasConflicts: false,
+        message: "Could not preview this merge.",
+        detail: message,
+      }
+    }
+  }
+
+  async mergeBranch(args: {
+    projectId: string
+    projectPath: string
+    branch: SelectedBranch
+  }): Promise<ChatMergeBranchResult> {
+    const repo = await resolveRepo(args.projectPath)
+    if (!repo) {
+      throw new Error("Project is not in a git repository")
+    }
+
+    const currentDirtyPaths = await listDirtyPaths(repo.repoRoot)
+    if (currentDirtyPaths.length > 0) {
+      return {
+        ok: false,
+        title: "Merge blocked",
+        message: "Commit, discard, or stash your local changes before merging.",
+        snapshotChanged: false,
+      }
+    }
+
+    const resolvedBranch = await resolveSelectedBranchRef(repo.repoRoot, args.branch)
+    const commitCount = await getMergeCommitCount(repo.repoRoot, resolvedBranch.ref)
+    if (commitCount === 0) {
+      return {
+        ok: false,
+        title: "Already up to date",
+        message: `${resolvedBranch.displayName} is already merged into ${await getBranchName(repo.repoRoot) ?? "the current branch"}.`,
+        snapshotChanged: false,
+      }
+    }
+
+    const mergeResult = await runGit(["merge", "--no-edit", resolvedBranch.ref], repo.repoRoot)
+    const detail = formatGitFailure(mergeResult)
+
+    if (mergeResult.exitCode !== 0) {
+      const snapshotChanged = await this.refreshSnapshot(args.projectId, args.projectPath)
+      const normalized = detail.toLowerCase()
+      const title = normalized.includes("conflict")
+        ? "Merge conflicts need resolution"
+        : "Merge failed"
+      const fallback = normalized.includes("conflict")
+        ? "Git reported merge conflicts while merging this branch."
+        : "Git could not merge this branch."
+      return createMergeActionFailure({
+        title,
+        detail,
+        fallback,
+        snapshotChanged,
+      })
+    }
+
+    const snapshotChanged = await this.refreshSnapshot(args.projectId, args.projectPath)
+    return {
+      ok: true,
+      branchName: await getBranchName(repo.repoRoot),
+      snapshotChanged,
+    }
+  }
+
+  async checkoutBranch(args: {
+    projectId: string
+    projectPath: string
+    branch: SelectedBranch
     bringChanges?: boolean
   }): Promise<ChatCheckoutBranchResult> {
     const repo = await resolveRepo(args.projectPath)
@@ -1085,7 +1436,7 @@ export class DiffStore {
       return createBranchActionFailure("Checkout failed", formatGitFailure(switchResult), "Git could not switch branches.")
     }
 
-    const snapshotChanged = await this.refreshSnapshot(args.chatId, args.projectPath)
+    const snapshotChanged = await this.refreshSnapshot(args.projectId, args.projectPath)
     return {
       ok: true,
       branchName: await getBranchName(repo.repoRoot),
@@ -1094,7 +1445,7 @@ export class DiffStore {
   }
 
   async createBranch(args: {
-    chatId: string
+    projectId: string
     projectPath: string
     name: string
     baseBranchName?: string
@@ -1134,7 +1485,7 @@ export class DiffStore {
       return createBranchActionFailure("Create branch failed", formatGitFailure(switchResult), "Git could not create the branch.")
     }
 
-    const snapshotChanged = await this.refreshSnapshot(args.chatId, args.projectPath)
+    const snapshotChanged = await this.refreshSnapshot(args.projectId, args.projectPath)
     return {
       ok: true,
       branchName,
@@ -1143,7 +1494,7 @@ export class DiffStore {
   }
 
   async syncBranch(args: {
-    chatId: string
+    projectId: string
     projectPath: string
     action: "fetch" | "pull" | "publish"
   }): Promise<ChatSyncResult> {
@@ -1176,7 +1527,7 @@ export class DiffStore {
         }
       }
 
-      const snapshotChanged = await this.refreshSnapshot(args.chatId, args.projectPath)
+      const snapshotChanged = await this.refreshSnapshot(args.projectId, args.projectPath)
       const branchName = await getBranchName(repo.repoRoot)
       const nextHasUpstream = await hasUpstreamBranch(repo.repoRoot)
       const { aheadCount, behindCount } = nextHasUpstream
@@ -1231,7 +1582,7 @@ export class DiffStore {
       }
     }
 
-    const snapshotChanged = await this.refreshSnapshot(args.chatId, args.projectPath)
+    const snapshotChanged = await this.refreshSnapshot(args.projectId, args.projectPath)
     const branchName = await getBranchName(repo.repoRoot)
     const nextHasUpstream = await hasUpstreamBranch(repo.repoRoot)
     const { aheadCount, behindCount } = nextHasUpstream
@@ -1262,14 +1613,24 @@ export class DiffStore {
       throw new Error("Project is not in a git repository")
     }
 
-    const files = await computeCurrentFiles(repo.repoRoot, repo.baseCommit)
-    const selectedFiles = normalizedPaths.map((selectedPath) => {
-      const file = files.find((candidate) => candidate.path === selectedPath)
-      if (!file) {
+    const currentDirtyPaths = await listDirtyPaths(repo.repoRoot)
+    const selectedFiles = await Promise.all(normalizedPaths.map(async (selectedPath) => {
+      const entry = currentDirtyPaths.find((candidate) => candidate.path === selectedPath)
+      if (!entry) {
         throw new Error(`File is no longer changed: ${selectedPath}`)
       }
-      return file
-    })
+
+      const beforePath = entry.previousPath ?? selectedPath
+      const beforeText = await readBaseFile(repo.repoRoot, repo.baseCommit, beforePath)
+      const afterText = await readWorktreeFile(repo.repoRoot, selectedPath)
+      const patch = await createPatch(beforePath, selectedPath, beforeText, afterText)
+
+      return {
+        path: selectedPath,
+        changeType: entry.changeType,
+        patch,
+      }
+    }))
 
     const branchName = await getBranchName(repo.repoRoot)
     return await generateCommitMessageDetailed({
@@ -1280,7 +1641,7 @@ export class DiffStore {
   }
 
   async commitFiles(args: {
-    chatId: string
+    projectId: string
     projectPath: string
     paths: string[]
     summary: string
@@ -1302,6 +1663,7 @@ export class DiffStore {
     if (!repo) {
       throw new Error("Project is not in a git repository")
     }
+    const hasUpstream = await hasUpstreamBranch(repo.repoRoot)
 
     const currentDirtyPaths = new Set((await listDirtyPaths(repo.repoRoot)).map((entry) => entry.path))
     const missingPaths = normalizedPaths.filter((relativePath) => !currentDirtyPaths.has(relativePath))
@@ -1325,7 +1687,7 @@ export class DiffStore {
       return createCommitFailure(args.mode, formatGitFailure(commitResult))
     }
 
-    const snapshotChanged = await this.refreshSnapshot(args.chatId, args.projectPath)
+    const snapshotChanged = await this.refreshSnapshot(args.projectId, args.projectPath)
     const branchName = await getBranchName(repo.repoRoot)
 
     if (args.mode === "commit_only") {
@@ -1338,12 +1700,14 @@ export class DiffStore {
       } satisfies DiffCommitResult
     }
 
-    const pushResult = await runGit(["push"], repo.repoRoot)
+    const pushResult = hasUpstream
+      ? await runGit(["push"], repo.repoRoot)
+      : await runGit(["push", "-u", "origin", "HEAD"], repo.repoRoot)
     if (pushResult.exitCode !== 0) {
       return createPushFailure(args.mode, formatGitFailure(pushResult), snapshotChanged)
     }
 
-    const postPushSnapshotChanged = await this.refreshSnapshot(args.chatId, args.projectPath)
+    const postPushSnapshotChanged = await this.refreshSnapshot(args.projectId, args.projectPath)
 
     return {
       ok: true,
@@ -1355,7 +1719,7 @@ export class DiffStore {
   }
 
   async discardFile(args: {
-    chatId: string
+    projectId: string
     projectPath: string
     path: string
   }) {
@@ -1391,12 +1755,12 @@ export class DiffStore {
     }
 
     return {
-      snapshotChanged: await this.refreshSnapshot(args.chatId, args.projectPath),
+      snapshotChanged: await this.refreshSnapshot(args.projectId, args.projectPath),
     }
   }
 
   async ignoreFile(args: {
-    chatId: string
+    projectId: string
     projectPath: string
     path: string
   }) {
@@ -1422,7 +1786,7 @@ export class DiffStore {
     }
 
     return {
-      snapshotChanged: await this.refreshSnapshot(args.chatId, args.projectPath),
+      snapshotChanged: await this.refreshSnapshot(args.projectId, args.projectPath),
     }
   }
 }

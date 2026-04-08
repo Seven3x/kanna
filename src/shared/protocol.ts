@@ -1,6 +1,7 @@
 import type {
   AgentProvider,
   ChatAttachment,
+  ChatDiffSnapshot,
   ChatHistoryPage,
   ChatSnapshot,
   DiffCommitMode,
@@ -24,6 +25,7 @@ export type SubscriptionTopic =
   | { type: "update" }
   | { type: "keybindings" }
   | { type: "chat"; chatId: string; recentLimit?: number }
+  | { type: "project-git"; projectId: string }
   | { type: "terminal"; terminalId: string }
 
 export interface TerminalSnapshot {
@@ -48,6 +50,7 @@ export type ClientCommand =
   | { type: "project.open"; localPath: string }
   | { type: "project.create"; localPath: string; title: string }
   | { type: "project.remove"; projectId: string }
+  | { type: "project.readDiffPatch"; projectId: string; path: string }
   | { type: "system.ping" }
   | { type: "update.check"; force?: boolean }
   | { type: "update.install" }
@@ -79,6 +82,38 @@ export type ClientCommand =
     }
   | { type: "chat.refreshDiffs"; chatId: string }
   | { type: "chat.listBranches"; chatId: string }
+  | {
+      type: "chat.previewMergeBranch"
+      chatId: string
+      branch:
+      | { kind: "local"; name: string }
+      | { kind: "remote"; name: string; remoteRef: string }
+      | {
+          kind: "pull_request"
+          name: string
+          prNumber: number
+          headRefName: string
+          headRepoCloneUrl?: string
+          isCrossRepository?: boolean
+          remoteRef?: string
+        }
+    }
+  | {
+      type: "chat.mergeBranch"
+      chatId: string
+      branch:
+      | { kind: "local"; name: string }
+      | { kind: "remote"; name: string; remoteRef: string }
+      | {
+          kind: "pull_request"
+          name: string
+          prNumber: number
+          headRefName: string
+          headRepoCloneUrl?: string
+          isCrossRepository?: boolean
+          remoteRef?: string
+        }
+    }
   | { type: "chat.syncBranch"; chatId: string; action: "fetch" | "pull" | "publish" }
   | {
       type: "chat.checkoutBranch"
@@ -122,6 +157,7 @@ export type ServerSnapshot =
   | { type: "update"; data: UpdateSnapshot }
   | { type: "keybindings"; data: KeybindingsSnapshot }
   | { type: "chat"; data: ChatSnapshot | null }
+  | { type: "project-git"; data: ChatDiffSnapshot | null }
   | { type: "terminal"; data: TerminalSnapshot | null }
 
 export type ServerEnvelope =

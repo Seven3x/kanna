@@ -6,6 +6,9 @@ export const KEYBINDING_ACTION_LABELS: Record<KeybindingAction, string> = {
   openInFinder: "Open In Finder",
   openInEditor: "Open In Editor",
   addSplitTerminal: "Add Split Terminal",
+  jumpToSidebarChat: "Jump To Sidebar Chat",
+  createChatInCurrentProject: "New Chat In Current Project",
+  openAddProject: "Open Add Project",
 }
 
 export function formatKeybindingInput(bindings: string[] | undefined) {
@@ -43,7 +46,7 @@ export function bindingMatchesEvent(binding: string, event: KeyboardEvent) {
   if (!parsed) return false
 
   return (
-    event.key.toLowerCase() === parsed.key &&
+    eventMatchesParsedKey(event, parsed.key) &&
     event.ctrlKey === parsed.ctrl &&
     event.metaKey === parsed.meta &&
     event.altKey === parsed.alt &&
@@ -56,8 +59,23 @@ export function actionMatchesEvent(
   action: KeybindingAction,
   event: KeyboardEvent
 ) {
-  const bindings = snapshot?.bindings[action] ?? DEFAULT_KEYBINDINGS[action]
+  const bindings = getBindingsForAction(snapshot, action)
   return bindings.some((binding) => bindingMatchesEvent(binding, event))
+}
+
+export function findMatchingActionBinding(
+  snapshot: KeybindingsSnapshot | null,
+  action: KeybindingAction,
+  event: KeyboardEvent
+) {
+  return getBindingsForAction(snapshot, action).find((binding) => bindingMatchesEvent(binding, event)) ?? null
+}
+
+export function getBindingsForAction(
+  snapshot: KeybindingsSnapshot | null,
+  action: KeybindingAction
+) {
+  return snapshot?.bindings[action] ?? DEFAULT_KEYBINDINGS[action]
 }
 
 export function getResolvedKeybindings(snapshot: KeybindingsSnapshot | null): KeybindingsSnapshot {
@@ -68,6 +86,9 @@ export function getResolvedKeybindings(snapshot: KeybindingsSnapshot | null): Ke
       openInFinder: snapshot?.bindings.openInFinder ?? DEFAULT_KEYBINDINGS.openInFinder,
       openInEditor: snapshot?.bindings.openInEditor ?? DEFAULT_KEYBINDINGS.openInEditor,
       addSplitTerminal: snapshot?.bindings.addSplitTerminal ?? DEFAULT_KEYBINDINGS.addSplitTerminal,
+      jumpToSidebarChat: snapshot?.bindings.jumpToSidebarChat ?? DEFAULT_KEYBINDINGS.jumpToSidebarChat,
+      createChatInCurrentProject: snapshot?.bindings.createChatInCurrentProject ?? DEFAULT_KEYBINDINGS.createChatInCurrentProject,
+      openAddProject: snapshot?.bindings.openAddProject ?? DEFAULT_KEYBINDINGS.openAddProject,
     },
     warning: snapshot?.warning ?? null,
     filePathDisplay: snapshot?.filePathDisplay ?? "",
@@ -112,4 +133,35 @@ function parseBinding(binding: string): ParsedBinding | null {
   }
 
   return parsed.key ? parsed : null
+}
+
+function eventMatchesParsedKey(event: KeyboardEvent, key: string) {
+  if (event.key.toLowerCase() === key) {
+    return true
+  }
+
+  const expectedCode = keyToCode(key)
+  if (!expectedCode) {
+    return false
+  }
+
+  return event.code === expectedCode
+}
+
+function keyToCode(key: string) {
+  if (key.length === 1 && key >= "a" && key <= "z") {
+    return `Key${key.toUpperCase()}`
+  }
+  if (key.length === 1 && key >= "0" && key <= "9") {
+    return `Digit${key}`
+  }
+
+  switch (key) {
+    case "/":
+      return "Slash"
+    case "`":
+      return "Backquote"
+    default:
+      return null
+  }
 }

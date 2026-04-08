@@ -3,6 +3,7 @@ import { Archive, Loader2 } from "lucide-react"
 import type { SidebarChatRow } from "../../../../shared/types"
 import { AnimatedShinyText } from "../../ui/animated-shiny-text"
 import { Button } from "../../ui/button"
+import { Kbd } from "../../ui/kbd"
 import { formatSidebarAgeLabel } from "../../../lib/formatters"
 import { cn, normalizeChatId } from "../../../lib/utils"
 
@@ -12,6 +13,8 @@ interface Props {
   chat: SidebarChatRow
   activeChatId: string | null
   nowMs: number
+  shortcutHint?: string | null
+  showShortcutHint?: boolean
   onSelectChat: (chatId: string) => void
   onDeleteChat: (chatId: string) => void
 }
@@ -20,10 +23,14 @@ function ChatRowImpl({
   chat,
   activeChatId,
   nowMs,
+  shortcutHint = null,
+  showShortcutHint = false,
   onSelectChat,
   onDeleteChat,
 }: Props) {
   const ageLabel = formatSidebarAgeLabel(chat.lastMessageAt, nowMs)
+  const trailingLabel = showShortcutHint && shortcutHint ? shortcutHint : ageLabel
+  const showShortcutKeycap = showShortcutHint && Boolean(shortcutHint)
   const normalizedChatId = normalizeChatId(chat.chatId)
 
   return (
@@ -66,17 +73,25 @@ function ChatRowImpl({
         )}
       </span>
       <div className="relative h-7 w-7 mr-[2px] shrink-0">
-        {ageLabel ? (
-          <span className="hidden md:flex absolute inset-0 items-center justify-end pr-1 text-[11px] text-muted-foreground opacity-50 transition-opacity group-hover:opacity-0">
-            {ageLabel}
-          </span>
+        {trailingLabel ? (
+          showShortcutKeycap ? (
+            <span className="hidden md:flex absolute inset-0 items-center justify-end pr-0.5 text-[11px] text-foreground transition-opacity group-hover:opacity-0">
+              <Kbd className="h-4 min-w-4 rounded-sm border-border/50 bg-transparent px-1 text-[10px]">
+                {shortcutHint}
+              </Kbd>
+            </span>
+          ) : (
+            <span className="hidden md:flex absolute inset-0 items-center justify-end pr-1 text-[11px] text-muted-foreground opacity-50 transition-opacity group-hover:opacity-0">
+              {trailingLabel}
+            </span>
+          )
         ) : null}
         <Button
           variant="ghost"
           size="icon"
           className={cn(
             "absolute inset-0 h-7 w-7 opacity-100 cursor-pointer rounded-sm hover:!bg-transparent !border-0",
-            ageLabel
+            trailingLabel
               ? "md:opacity-0 md:group-hover:opacity-100"
               : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
           )}

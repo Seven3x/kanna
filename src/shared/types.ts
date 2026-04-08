@@ -273,6 +273,9 @@ export type KeybindingAction =
   | "openInFinder"
   | "openInEditor"
   | "addSplitTerminal"
+  | "jumpToSidebarChat"
+  | "createChatInCurrentProject"
+  | "openAddProject"
 
 export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string[]> = {
   toggleEmbeddedTerminal: ["cmd+j", "ctrl+`"],
@@ -280,6 +283,9 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string[]> = {
   openInFinder: ["cmd+alt+f", "ctrl+alt+f"],
   openInEditor: ["cmd+shift+o", "ctrl+shift+o"],
   addSplitTerminal: ["cmd+/", "ctrl+/"],
+  jumpToSidebarChat: ["cmd+alt"],
+  createChatInCurrentProject: ["cmd+alt+n"],
+  openAddProject: ["cmd+alt+o"],
 }
 
 export interface KeybindingsSnapshot {
@@ -472,7 +478,9 @@ export interface ChatDiffFile {
   path: string
   changeType: "added" | "deleted" | "modified" | "renamed"
   isUntracked: boolean
-  patch: string
+  additions: number
+  deletions: number
+  patchDigest: string
   mimeType?: string
   size?: number
 }
@@ -575,6 +583,23 @@ export type ChatCheckoutBranchResult = ChatCheckoutBranchSuccess | ChatCheckoutB
 export type ChatCreateBranchSuccess = BranchActionSuccess & { branchName: string }
 export type ChatCreateBranchFailure = BranchActionFailure
 export type ChatCreateBranchResult = ChatCreateBranchSuccess | ChatCreateBranchFailure
+
+export type ChatMergePreviewStatus = "up_to_date" | "mergeable" | "conflicts" | "error"
+
+export interface ChatMergePreviewResult {
+  currentBranchName?: string
+  targetBranchName: string
+  targetDisplayName: string
+  status: ChatMergePreviewStatus
+  commitCount: number
+  hasConflicts: boolean
+  message: string
+  detail?: string
+}
+
+export type ChatMergeBranchSuccess = BranchActionSuccess
+export type ChatMergeBranchFailure = BranchActionFailure
+export type ChatMergeBranchResult = ChatMergeBranchSuccess | ChatMergeBranchFailure
 
 export type DiffCommitSuccess = BranchActionSuccess & {
   mode: DiffCommitMode
@@ -764,7 +789,6 @@ export interface ChatSnapshot {
   runtime: ChatRuntime
   messages: TranscriptEntry[]
   history: ChatHistorySnapshot
-  diffs: ChatDiffSnapshot
   availableProviders: ProviderCatalogEntry[]
 }
 

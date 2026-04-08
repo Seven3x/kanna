@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
-import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type ChatHistoryPage, type KeybindingsSnapshot, type ModelOptions, type ProviderCatalogEntry, type TranscriptEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
+import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type ChatDiffSnapshot, type ChatHistoryPage, type KeybindingsSnapshot, type ModelOptions, type ProviderCatalogEntry, type TranscriptEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
 import { NEW_CHAT_COMPOSER_ID, type ComposerState, useChatPreferencesStore } from "../stores/chatPreferencesStore"
 import { useRightSidebarStore } from "../stores/rightSidebarStore"
 import { useTerminalLayoutStore } from "../stores/terminalLayoutStore"
@@ -49,7 +49,7 @@ function sameHistory(left: ChatSnapshot["history"] | null | undefined, right: Ch
     && left.recentLimit === right.recentLimit
 }
 
-function sameDiffs(left: ChatSnapshot["diffs"] | null | undefined, right: ChatSnapshot["diffs"] | null | undefined) {
+function sameDiffs(left: ChatDiffSnapshot | null | undefined, right: ChatDiffSnapshot | null | undefined) {
   if (left === right) return true
   if (!left || !right) return false
   if (left.status !== right.status) return false
@@ -82,13 +82,18 @@ function sameDiffs(left: ChatSnapshot["diffs"] | null | undefined, right: ChatSn
     return Boolean(other)
       && file.path === other.path
       && file.changeType === other.changeType
-      && file.patch === other.patch
+      && file.isUntracked === other.isUntracked
+      && file.additions === other.additions
+      && file.deletions === other.deletions
+      && file.patchDigest === other.patchDigest
+      && file.mimeType === other.mimeType
+      && file.size === other.size
   })
 }
 
 function shouldPreserveExistingProjectDiffs(
-  current: ChatSnapshot["diffs"] | null | undefined,
-  next: ChatSnapshot["diffs"] | null | undefined
+  current: ChatDiffSnapshot | null | undefined,
+  next: ChatDiffSnapshot | null | undefined
 ) {
   return Boolean(
     current
@@ -282,7 +287,7 @@ export interface KannaState {
   localProjects: LocalProjectsSnapshot | null
   updateSnapshot: UpdateSnapshot | null
   chatSnapshot: ChatSnapshot | null
-  chatDiffSnapshot: ChatSnapshot["diffs"] | null
+  chatDiffSnapshot: ChatDiffSnapshot | null
   keybindings: KeybindingsSnapshot | null
   connectionStatus: SocketStatus
   sidebarReady: boolean
@@ -307,10 +312,13 @@ export interface KannaState {
   navbarLocalPath?: string
   editorLabel: string
   hasSelectedProject: boolean
+  addProjectModalOpen: boolean
   openSidebar: () => void
   closeSidebar: () => void
   collapseSidebar: () => void
   expandSidebar: () => void
+  openAddProjectModal: () => void
+  closeAddProjectModal: () => void
   updateScrollState: () => void
   scrollToBottom: () => void
   loadOlderHistory: () => Promise<void>
@@ -355,7 +363,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [historyCursor, setHistoryCursor] = useState<string | null>(null)
   const [hasOlderHistory, setHasOlderHistory] = useState(false)
-  const [projectDiffSnapshots, setProjectDiffSnapshots] = useState<Record<string, ChatSnapshot["diffs"] | null>>({})
+  const [projectDiffSnapshots, setProjectDiffSnapshots] = useState<Record<string, ChatDiffSnapshot | null>>({})
   const [keybindings, setKeybindings] = useState<KeybindingsSnapshot | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<SocketStatus>("connecting")
   const [sidebarReady, setSidebarReady] = useState(false)
@@ -364,6 +372,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [addProjectModalOpen, setAddProjectModalOpen] = useState(false)
   const [inputHeight, setInputHeight] = useState(148)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [commandError, setCommandError] = useState<string | null>(null)
@@ -371,7 +380,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [pendingChatId, setPendingChatId] = useState<string | null>(null)
   const [focusEpoch, setFocusEpoch] = useState(0)
   const chatSubscriptionDebugRef = useRef(0)
-  const lastActiveProjectDiffRef = useRef<{ projectId: string | null; diffs: ChatSnapshot["diffs"] | null }>({
+  const lastActiveProjectDiffRef = useRef<{ projectId: string | null; diffs: ChatDiffSnapshot | null }>({
     projectId: null,
     diffs: null,
   })
@@ -491,50 +500,14 @@ export function useKannaState(activeChatId: string | null): KannaState {
           snapshotProvider: snapshot?.runtime.provider ?? null,
           snapshotStatus: snapshot?.runtime.status ?? null,
           messageCount: snapshot?.messages.length ?? 0,
-          diffStatus: snapshot?.diffs?.status ?? null,
-          diffFileCount: snapshot?.diffs?.files.length ?? 0,
+          diffStatus: null,
+          diffFileCount: 0,
           reusedSnapshot: reused,
         })
         return reused ? current : snapshot
       })
       setHistoryCursor(snapshot?.history.olderCursor ?? null)
       setHasOlderHistory(snapshot?.history.hasOlder ?? false)
-      if (snapshot?.runtime.projectId) {
-        setProjectDiffSnapshots((current) => {
-          const projectId = snapshot.runtime.projectId
-          const nextDiffs = snapshot.diffs ?? null
-          if (shouldPreserveExistingProjectDiffs(current[projectId] ?? null, nextDiffs)) {
-            logKannaState("preserving previous project diffs", {
-              subscriptionId,
-              projectId,
-              nextStatus: nextDiffs?.status ?? null,
-              nextFiles: nextDiffs?.files.length ?? 0,
-            })
-            return current
-          }
-          if (sameDiffs(current[projectId] ?? null, nextDiffs)) {
-            logKannaState("project diffs unchanged", {
-              subscriptionId,
-              projectId,
-              status: nextDiffs?.status ?? null,
-              files: nextDiffs?.files.length ?? 0,
-            })
-            return current
-          }
-          logKannaState("project diffs updated", {
-            subscriptionId,
-            projectId,
-            previousStatus: current[projectId]?.status ?? null,
-            previousFiles: current[projectId]?.files.length ?? 0,
-            nextStatus: nextDiffs?.status ?? null,
-            nextFiles: nextDiffs?.files.length ?? 0,
-          })
-          return {
-            ...current,
-            [projectId]: nextDiffs,
-          }
-        })
-      }
       setChatReady(true)
       setCommandError(null)
     })
@@ -651,6 +624,31 @@ export function useKannaState(activeChatId: string | null): KannaState {
 
     return currentDiffs
   }, [activeProjectId, projectDiffSnapshots])
+
+  useEffect(() => {
+    if (!activeProjectId) {
+      return
+    }
+
+    const unsubscribe = socket.subscribe<ChatDiffSnapshot | null>({ type: "project-git", projectId: activeProjectId }, (snapshot) => {
+      setProjectDiffSnapshots((current) => {
+        const nextDiffs = snapshot ?? null
+        if (shouldPreserveExistingProjectDiffs(current[activeProjectId] ?? null, nextDiffs)) {
+          return current
+        }
+        if (sameDiffs(current[activeProjectId] ?? null, nextDiffs)) {
+          return current
+        }
+        return {
+          ...current,
+          [activeProjectId]: nextDiffs,
+        }
+      })
+      setCommandError(null)
+    })
+
+    return unsubscribe
+  }, [activeProjectId, socket])
   useEffect(() => {
     logKannaState("active snapshot resolved", {
       routeChatId: activeChatId,
@@ -1061,6 +1059,8 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
   const collapseSidebar = useCallback(() => setSidebarCollapsed(true), [])
   const expandSidebar = useCallback(() => setSidebarCollapsed(false), [])
+  const openAddProjectModal = useCallback(() => setAddProjectModalOpen(true), [])
+  const closeAddProjectModal = useCallback(() => setAddProjectModalOpen(false), [])
 
   const handleAskUserQuestion = useCallback(async (
     toolUseId: string,
@@ -1134,10 +1134,13 @@ export function useKannaState(activeChatId: string | null): KannaState {
     navbarLocalPath,
     editorLabel,
     hasSelectedProject,
+    addProjectModalOpen,
     openSidebar,
     closeSidebar,
     collapseSidebar,
     expandSidebar,
+    openAddProjectModal,
+    closeAddProjectModal,
     updateScrollState,
     scrollToBottom,
     loadOlderHistory,
