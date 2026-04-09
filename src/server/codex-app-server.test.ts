@@ -181,6 +181,81 @@ describe("CodexAppServerManager", () => {
     expect(turnStart?.params.collaborationMode?.settings?.reasoning_effort).toBeNull()
   })
 
+  test("emits hidden context window updates from token usage notifications", async () => {
+    const process = new FakeCodexProcess((message, child) => {
+      if (message.method === "initialize") {
+        child.writeServerMessage({ id: message.id, result: { userAgent: "codex-test" } })
+      } else if (message.method === "thread/start") {
+        child.writeServerMessage({
+          id: message.id,
+          result: { thread: { id: "thread-usage" }, model: "gpt-5.4", reasoningEffort: "high" },
+        })
+      } else if (message.method === "turn/start") {
+        child.writeServerMessage({
+          id: message.id,
+          result: { turn: { id: "turn-usage", status: "completed", error: null } },
+        })
+        child.writeServerMessage({
+          method: "thread/tokenUsage/updated",
+          params: {
+            threadId: "thread-usage",
+            turnId: "turn-usage",
+            tokenUsage: {
+              last: {
+                inputTokens: 1200,
+                outputTokens: 300,
+                totalTokens: 1500,
+              },
+              total: {
+                totalTokens: 2000,
+              },
+              modelContextWindow: 200000,
+            },
+          },
+        })
+        child.writeServerMessage({
+          method: "turn/completed",
+          params: {
+            threadId: "thread-usage",
+            turn: { id: "turn-usage", status: "completed", error: null },
+          },
+        })
+      }
+    })
+
+    const manager = new CodexAppServerManager({
+      spawnProcess: () => process as never,
+    })
+
+    await manager.startSession({
+      chatId: "chat-usage",
+      cwd: "/tmp/project",
+      model: "gpt-5.4",
+      sessionToken: null,
+    })
+
+    const turn = await manager.startTurn({
+      chatId: "chat-usage",
+      model: "gpt-5.4",
+      content: "Measure usage",
+      planMode: false,
+      onToolRequest: async () => ({}),
+    })
+
+    const events = await collectStream(turn.stream)
+    const usageEvent = events.find((event) => event.type === "transcript" && event.entry.kind === "context_window_updated")
+
+    expect(usageEvent).toBeDefined()
+    if (!usageEvent || usageEvent.type !== "transcript" || usageEvent.entry.kind !== "context_window_updated") {
+      throw new Error("missing usage event")
+    }
+    expect(usageEvent.entry.hidden).toBe(true)
+    expect(usageEvent.entry.usage.usedTokens).toBe(1500)
+    expect(usageEvent.entry.usage.totalProcessedTokens).toBe(2000)
+    expect(usageEvent.entry.usage.maxTokens).toBe(200000)
+    expect(usageEvent.entry.usage.compactsAutomatically).toBe(true)
+  })
+
   test("recreates a thread before turn/start when an existing session has no token", async () => {
     const process = new FakeCodexProcess((message, child) => {
       if (message.method === "initialize") {

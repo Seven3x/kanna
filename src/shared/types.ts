@@ -183,6 +183,16 @@ export function resolveClaudeApiModelId(modelId: string, contextWindow?: ClaudeC
   return contextWindow === "1m" ? `${modelId}[1m]` : modelId
 }
 
+export function resolveClaudeContextWindowTokens(contextWindow: ClaudeContextWindow): number {
+  switch (contextWindow) {
+    case "1m":
+      return 1_000_000
+    case "200k":
+    default:
+      return 200_000
+  }
+}
+
 export type KannaStatus =
   | "idle"
   | "starting"
@@ -324,6 +334,24 @@ export interface CodexUsageSnapshot {
   meteredTurnCount: number
   totalCostUsd: number
   lastActiveAt: number | null
+}
+
+export interface ContextWindowUsageSnapshot {
+  usedTokens: number
+  maxTokens?: number
+  inputTokens?: number
+  cachedInputTokens?: number
+  outputTokens?: number
+  reasoningOutputTokens?: number
+  totalProcessedTokens?: number
+  lastUsedTokens?: number
+  lastInputTokens?: number
+  lastCachedInputTokens?: number
+  lastOutputTokens?: number
+  lastReasoningOutputTokens?: number
+  toolUses?: number
+  durationMs?: number
+  compactsAutomatically: boolean
 }
 
 export interface AskUserQuestionOption {
@@ -491,6 +519,11 @@ export interface InterruptedEntry extends TranscriptEntryBase {
   kind: "interrupted"
 }
 
+export interface ContextWindowUpdatedEntry extends TranscriptEntryBase {
+  kind: "context_window_updated"
+  usage: ContextWindowUsageSnapshot
+}
+
 export type TranscriptEntry =
   | UserPromptEntry
   | SystemInitEntry
@@ -504,6 +537,7 @@ export type TranscriptEntry =
   | CompactSummaryEntry
   | ContextClearedEntry
   | InterruptedEntry
+  | ContextWindowUpdatedEntry
 
 export interface HydratedToolCallBase<TKind extends string, TInput, TResult> {
   id: string
@@ -657,6 +691,7 @@ export type HydratedTranscriptMessage =
   | ({ kind: "assistant_text"; text: string; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "result"; success: boolean; cancelled?: boolean; result: string; durationMs: number; costUsd?: number; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "status"; status: string; id: string; messageId?: string; timestamp: string; hidden?: boolean })
+  | ({ kind: "context_window_updated"; usage: ContextWindowUsageSnapshot; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "compact_boundary"; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "compact_summary"; summary: string; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "context_cleared"; id: string; messageId?: string; timestamp: string; hidden?: boolean })
@@ -677,10 +712,23 @@ export interface ChatRuntime {
   skills?: ProjectSkillSummary[]
 }
 
+export interface ChatHistorySnapshot {
+  hasOlder: boolean
+  olderCursor: string | null
+  recentLimit: number
+}
+
 export interface ChatSnapshot {
   runtime: ChatRuntime
   messages: TranscriptEntry[]
+  history: ChatHistorySnapshot
   availableProviders: ProviderCatalogEntry[]
+}
+
+export interface ChatHistoryPage {
+  messages: TranscriptEntry[]
+  hasOlder: boolean
+  olderCursor: string | null
 }
 
 export interface KannaSnapshot {

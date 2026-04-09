@@ -10,17 +10,20 @@ import {
   type ProjectSkillSummary,
   type ProviderCatalogEntry,
   normalizeClaudeContextWindow,
+  resolveClaudeContextWindowTokens,
 } from "../../../shared/types"
 import { applySkillSuggestion, getSkillCompletionMatch, getSkillSuggestions, splitTextWithSkillMentions } from "../../lib/skills"
 import { Button } from "../ui/button"
 import { Textarea } from "../ui/textarea"
 import { ScrollArea } from "../ui/scroll-area"
 import { cn } from "../../lib/utils"
+import { type ContextWindowSnapshot, overrideContextWindowMaxTokens } from "../../lib/contextWindow"
 import { useIsStandalone } from "../../hooks/useIsStandalone"
 import { useChatInputStore } from "../../stores/chatInputStore"
 import { NEW_CHAT_COMPOSER_ID, type ComposerState, useChatPreferencesStore } from "../../stores/chatPreferencesStore"
 import { CHAT_INPUT_ATTRIBUTE, focusNextChatInput } from "../../app/chatFocusPolicy"
 import { ChatPreferenceControls } from "./ChatPreferenceControls"
+import { ContextWindowMeter } from "./ContextWindowMeter"
 import { AttachmentFileCard, AttachmentImageCard } from "../messages/AttachmentCard"
 import { AttachmentPreviewModal } from "../messages/AttachmentPreviewModal"
 import { classifyAttachmentPreview } from "../messages/attachmentPreview"
@@ -109,6 +112,7 @@ interface Props {
   activeProvider: AgentProvider | null
   availableProviders: ProviderCatalogEntry[]
   skills?: ProjectSkillSummary[]
+  contextWindowSnapshot?: ContextWindowSnapshot | null
 }
 
 export interface ChatInputHandle {
@@ -211,6 +215,7 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
   activeProvider,
   availableProviders,
   skills = [],
+  contextWindowSnapshot = null,
 }, forwardedRef) {
   const {
     getDraft,
@@ -265,6 +270,24 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const selectedProvider = providerLocked ? activeProvider : composerState.provider
   const providerConfig = availableProviders.find((provider) => provider.id === selectedProvider) ?? availableProviders[0]
   const showPlanMode = providerConfig?.supportsPlanMode ?? false
+  const activeContextWindow = useMemo(() => {
+    if (!contextWindowSnapshot) {
+      return null
+    }
+
+    if (providerPrefs.provider !== "claude") {
+      return contextWindowSnapshot
+    }
+
+    const maxTokens = providerPrefs.modelOptions.contextWindow
+      ? resolveClaudeContextWindowTokens(providerPrefs.modelOptions.contextWindow)
+      : null
+    return overrideContextWindowMaxTokens(contextWindowSnapshot, maxTokens)
+  }, [
+    contextWindowSnapshot,
+    providerPrefs.provider,
+    providerPrefs.provider === "claude" ? providerPrefs.modelOptions.contextWindow : undefined,
+  ])
 
   const skillNames = useMemo(() => skills.map((skill) => skill.name), [skills])
   const skillDescriptions = useMemo(
@@ -1047,53 +1070,66 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
         ) : null}
       </div>
 
-      <div className={cn("overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-3 flex flex-row", isStandalone && "p-5 pt-3")}>
-        <div className="min-w-3" />
-        <ChatPreferenceControls
-          availableProviders={availableProviders}
-          selectedProvider={selectedProvider}
-          providerLocked={providerLocked}
-          model={providerPrefs.model}
-          modelOptions={providerPrefs.modelOptions}
-          onProviderChange={(provider) => {
-            if (providerLocked) return
-            resetChatComposerFromProvider(composerChatId, provider)
-          }}
-          onModelChange={(_, model) => {
-            if (providerLocked) {
-              updateLockedComposerState((current) => {
-                const next = current ?? createLockedComposerState(selectedProvider, providerDefaults)
-                return withNormalizedContextWindow(next, model)
-              })
-              return
-            }
+      <div className={cn("relative py-3", isStandalone && "p-5 pt-3")}>
+        <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex flex-row">
+          <div className="min-w-3" />
+          <ChatPreferenceControls
+            availableProviders={availableProviders}
+            selectedProvider={selectedProvider}
+            providerLocked={providerLocked}
+            model={providerPrefs.model}
+            modelOptions={providerPrefs.modelOptions}
+            onProviderChange={(provider) => {
+              if (providerLocked) return
+              resetChatComposerFromProvider(composerChatId, provider)
+            }}
+            onModelChange={(_, model) => {
+              if (providerLocked) {
+                updateLockedComposerState((current) => {
+                  const next = current ?? createLockedComposerState(selectedProvider, providerDefaults)
+                  return withNormalizedContextWindow(next, model)
+                })
+                return
+              }
 
-            setChatComposerModel(composerChatId, model)
-          }}
-          onClaudeReasoningEffortChange={(effort) => setReasoningEffort(effort)}
-          onClaudeContextWindowChange={(contextWindow) => setClaudeContextWindow(contextWindow)}
-          onCodexReasoningEffortChange={(effort) => setReasoningEffort(effort)}
-          onCodexFastModeChange={(fastMode) => {
-            if (providerLocked) {
-              updateLockedComposerState((current) => {
-                const next = current ?? createLockedComposerState(selectedProvider, providerDefaults)
-                if (next.provider === "claude") return next
-                return {
-                  ...next,
-                  modelOptions: { ...next.modelOptions, fastMode },
-                }
-              })
-              return
-            }
+              setChatComposerModel(composerChatId, model)
+            }}
+            onClaudeReasoningEffortChange={(effort) => setReasoningEffort(effort)}
+            onClaudeContextWindowChange={(contextWindow) => setClaudeContextWindow(contextWindow)}
+            onCodexReasoningEffortChange={(effort) => setReasoningEffort(effort)}
+            onCodexFastModeChange={(fastMode) => {
+              if (providerLocked) {
+                updateLockedComposerState((current) => {
+                  const next = current ?? createLockedComposerState(selectedProvider, providerDefaults)
+                  if (next.provider === "claude") return next
+                  return {
+                    ...next,
+                    modelOptions: { ...next.modelOptions, fastMode },
+                  }
+                })
+                return
+              }
 
-            setChatComposerModelOptions(composerChatId, { fastMode })
-          }}
-          planMode={providerPrefs.planMode}
-          onPlanModeChange={setEffectivePlanMode}
-          includePlanMode={showPlanMode}
-          className="max-w-[840px] mx-auto"
-        />
-        <div className="min-w-3" />
+              setChatComposerModelOptions(composerChatId, { fastMode })
+            }}
+            planMode={providerPrefs.planMode}
+            onPlanModeChange={setEffectivePlanMode}
+            includePlanMode={showPlanMode}
+            className="max-w-[840px] mx-auto"
+          />
+          {activeContextWindow ? (
+            <div className="mx-[13px] flex items-center md:hidden">
+              <ContextWindowMeter usage={activeContextWindow} />
+            </div>
+          ) : null}
+          <div className="min-w-3" />
+        </div>
+
+        {activeContextWindow ? (
+          <div className="absolute right-[29px] top-1/2 hidden -translate-y-1/2 translate-x-1/2 md:block">
+            <ContextWindowMeter usage={activeContextWindow} />
+          </div>
+        ) : null}
       </div>
 
       <AttachmentPreviewModal attachment={selectedAttachment} onOpenChange={(open) => !open && setSelectedAttachmentId(null)} />

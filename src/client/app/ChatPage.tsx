@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { ArrowDown, Flower, Upload } from "lucide-react"
 import { useOutletContext } from "react-router-dom"
 import { ChatInput, type ChatInputHandle } from "../components/chat-ui/ChatInput"
@@ -13,6 +13,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../compone
 import { ScrollArea } from "../components/ui/scroll-area"
 import { actionMatchesEvent, getResolvedKeybindings } from "../lib/keybindings"
 import { resolveProjectLocalFilePath } from "../lib/projectFiles"
+import { deriveLatestContextWindowSnapshot, type ContextWindowSnapshot } from "../lib/contextWindow"
 import { cn } from "../lib/utils"
 import {
   DEFAULT_PROJECT_RIGHT_SIDEBAR_LAYOUT,
@@ -35,6 +36,20 @@ const EMPTY_STATE_TYPING_INTERVAL_MS = 19
 const CHAT_NAVBAR_OFFSET_PX = 72
 const SCROLL_BUTTON_BOTTOM_PX = 120
 
+function sameContextWindowSnapshot(left: ContextWindowSnapshot | null, right: ContextWindowSnapshot | null) {
+  if (left === right) return true
+  if (!left || !right) return false
+  return left.updatedAt === right.updatedAt
+    && left.usedTokens === right.usedTokens
+    && left.maxTokens === right.maxTokens
+    && left.inputTokens === right.inputTokens
+    && left.cachedInputTokens === right.cachedInputTokens
+    && left.outputTokens === right.outputTokens
+    && left.reasoningOutputTokens === right.reasoningOutputTokens
+    && left.totalProcessedTokens === right.totalProcessedTokens
+    && left.compactsAutomatically === right.compactsAutomatically
+}
+
 export function hasFileDragTypes(types: Iterable<string>) {
   return Array.from(types).includes("Files")
 }
@@ -50,6 +65,9 @@ export function ChatPage() {
   const [fixedTerminalHeight, setFixedTerminalHeight] = useState(0)
   const [isPageFileDragActive, setIsPageFileDragActive] = useState(false)
   const pageFileDragDepthRef = useRef(0)
+  const previousMessageCountRef = useRef(state.messages.length)
+  const pendingPrependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
+  const baseContextWindowSnapshotRef = useRef<ContextWindowSnapshot | null>(null)
   const projectId = state.runtime?.projectId ?? null
   const projectTerminalLayout = useTerminalLayoutStore((store) => (projectId ? store.projects[projectId] : undefined))
   const terminalLayout = projectTerminalLayout ?? DEFAULT_PROJECT_TERMINAL_LAYOUT
@@ -67,6 +85,15 @@ export function ChatPage() {
   const minColumnWidth = useTerminalPreferencesStore((store) => store.minColumnWidth)
   const keybindings = state.keybindings
   const resolvedKeybindings = useMemo(() => getResolvedKeybindings(keybindings), [keybindings])
+  const contextWindowSnapshot = useMemo(() => {
+    const derivedSnapshot = deriveLatestContextWindowSnapshot(state.chatSnapshot?.messages ?? [])
+    const previousSnapshot = baseContextWindowSnapshotRef.current
+    if (sameContextWindowSnapshot(previousSnapshot, derivedSnapshot)) {
+      return previousSnapshot
+    }
+    baseContextWindowSnapshotRef.current = derivedSnapshot
+    return derivedSnapshot
+  }, [state.chatSnapshot?.messages])
 
   const hasTerminals = terminalLayout.terminals.length > 0
   const showTerminalPane = Boolean(projectId && terminalLayout.isVisible && hasTerminals)
@@ -264,6 +291,45 @@ export function ChatPage() {
     })
   }
 
+  function handleTranscriptScroll() {
+    state.updateScrollState()
+
+    const scrollElement = state.scrollRef.current
+    if (!scrollElement) {
+      return
+    }
+
+    if (scrollElement.scrollTop > 0) {
+      return
+    }
+
+    if (!state.hasOlderHistory || state.isHistoryLoading) {
+      return
+    }
+
+    pendingPrependAnchorRef.current = {
+      scrollHeight: scrollElement.scrollHeight,
+      scrollTop: scrollElement.scrollTop,
+    }
+    void state.loadOlderHistory()
+  }
+
+  useLayoutEffect(() => {
+    const previousCount = previousMessageCountRef.current
+    const currentCount = state.messages.length
+
+    if (pendingPrependAnchorRef.current && !state.isHistoryLoading) {
+      const scrollElement = state.scrollRef.current
+      if (scrollElement && currentCount > previousCount) {
+        const heightDelta = scrollElement.scrollHeight - pendingPrependAnchorRef.current.scrollHeight
+        scrollElement.scrollTop = pendingPrependAnchorRef.current.scrollTop + heightDelta
+      }
+      pendingPrependAnchorRef.current = null
+    }
+
+    previousMessageCountRef.current = currentCount
+  }, [state.isHistoryLoading, state.messages.length, state.scrollRef])
+
   const chatCard = (
     <Card
       ref={chatCardRef}
@@ -321,7 +387,7 @@ export function ChatPage() {
 
         <ScrollArea
           ref={state.scrollRef}
-          onScroll={state.updateScrollState}
+          onScroll={handleTranscriptScroll}
           className="flex-1 min-h-0 px-4 scroll-pt-[72px]"
         >
           {state.messages.length === 0 ? <div style={{ height: state.transcriptPaddingBottom }} aria-hidden="true" /> : null}
@@ -331,10 +397,14 @@ export function ChatPage() {
                 <KannaTranscript
                   messages={state.messages}
                   isLoading={state.isProcessing}
+                  isHistoryLoading={state.isHistoryLoading}
+                  hasOlderHistory={state.hasOlderHistory}
+                  scrollContainerRef={state.scrollRef}
                   localPath={state.runtime?.localPath}
                   projectId={state.runtime?.projectId}
                   skills={state.currentProjectSkills}
                   latestToolIds={state.latestToolIds}
+                  onLoadOlderHistory={state.loadOlderHistory}
                   onOpenLocalLink={state.handleOpenLocalLink}
                   onOpenProjectFile={state.runtime?.localPath
                     ? (filePath) => {
@@ -454,6 +524,7 @@ export function ChatPage() {
             activeProvider={state.runtime?.provider ?? null}
             availableProviders={state.availableProviders}
             skills={state.currentProjectSkills}
+            contextWindowSnapshot={contextWindowSnapshot}
           />
         </div>
       </div>
