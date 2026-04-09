@@ -140,8 +140,8 @@ function SkillItem({
 }
 
 export function RightSidebar({ projectId, localPath, skills = [], onClose, onOpenInEditor }: RightSidebarProps) {
-  const [skillsExpanded, setSkillsExpanded] = useState(true)
-  const [filesExpanded, setFilesExpanded] = useState(true)
+  const [skillsExpanded, setSkillsExpanded] = useState(false)
+  const [filesExpanded, setFilesExpanded] = useState(false)
   const [expandedSkillKey, setExpandedSkillKey] = useState<string | null>(null)
 
   return (

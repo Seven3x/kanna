@@ -106,12 +106,14 @@ export function ProjectFilePreviewPanel({
       {state.status === "ready" ? (
         <>
           {state.data.kind === "image" ? (
-            <ScrollArea className="flex-1 min-h-0 px-3 py-3">
-              <img
-                src={buildProjectFileRawUrl(projectId, state.data.path)}
-                alt={state.data.name}
-                className="max-h-full w-full rounded-lg border border-border object-contain"
-              />
+            <ScrollArea className="flex-1 min-h-0">
+              <div className="flex min-h-full items-center justify-center p-3">
+                <img
+                  src={buildProjectFileRawUrl(projectId, state.data.path)}
+                  alt={state.data.name}
+                  className="h-auto max-h-[min(70vh,100%)] max-w-full rounded-lg border border-border object-contain"
+                />
+              </div>
             </ScrollArea>
           ) : null}
 

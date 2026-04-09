@@ -35,7 +35,7 @@ describe("RightSidebar", () => {
 
     expect(markup).toContain("Skills")
     expect(markup).toContain("Files")
-    expect(markup).toContain("shadcn")
+    expect(markup).not.toContain("shadcn")
     expect(markup).not.toContain("Component workflow helper.")
     expect(markup).not.toContain(".agents/skills/shadcn/SKILL.md")
   })

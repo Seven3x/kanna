@@ -18,7 +18,7 @@ export function ProjectFilePreviewDialog({
 }: ProjectFilePreviewDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg" className="h-[80vh] max-w-4xl overflow-hidden p-0">
+      <DialogContent size="lg" className="h-[80vh] min-h-[420px] w-[min(92vw,72rem)] max-w-none resize overflow-hidden p-0">
         <DialogHeader>
           <DialogTitle>File Preview</DialogTitle>
           <DialogDescription className="truncate">{filePath}</DialogDescription>
