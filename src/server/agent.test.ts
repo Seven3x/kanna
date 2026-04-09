@@ -1093,8 +1093,6 @@ describe("AgentCoordinator codex integration", () => {
 
   test("runTurn stops processing events after cancel", async () => {
     let resolveStream!: () => void
-    let yieldExtraEvent!: () => void
-    let extraEventYielded = false
 
     const fakeCodexManager = {
       async startSession() {},
@@ -1117,7 +1115,6 @@ describe("AgentCoordinator codex integration", () => {
             resolveStream = resolve
           })
           // This event arrives after cancel — should not be processed
-          extraEventYielded = true
           yield {
             type: "transcript" as const,
             entry: timestamped({

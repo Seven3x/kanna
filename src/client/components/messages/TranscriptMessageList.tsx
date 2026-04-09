@@ -190,6 +190,8 @@ export function TranscriptMessageList({
         return <CompactSummaryMessage key={message.id} message={message} />
       case "status":
         return index === messages.length - 1 ? <StatusMessage key={message.id} message={message} /> : null
+      case "context_window_updated":
+        return null
     }
   }
 

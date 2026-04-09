@@ -188,11 +188,17 @@ describe("getActiveChatSnapshot", () => {
         localPath: "/tmp/project-1",
         title: "Chat 1",
         status: "idle",
+        isDraining: false,
         provider: "codex",
         planMode: false,
         sessionToken: null,
       },
       messages: [],
+      history: {
+        hasOlder: false,
+        olderCursor: null,
+        recentLimit: 200,
+      },
       availableProviders: [],
     }
 
@@ -207,11 +213,17 @@ describe("getActiveChatSnapshot", () => {
         localPath: "/tmp/project-1",
         title: "Old chat",
         status: "idle",
+        isDraining: false,
         provider: "claude",
         planMode: false,
         sessionToken: null,
       },
       messages: [],
+      history: {
+        hasOlder: false,
+        olderCursor: null,
+        recentLimit: 200,
+      },
       availableProviders: [],
     }
 

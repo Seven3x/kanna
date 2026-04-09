@@ -1,8 +1,9 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
-import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type KeybindingsSnapshot, type ModelOptions, type ProjectSkillSummary, type ProviderCatalogEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
+import { PROVIDERS, type AgentProvider, type AskUserQuestionAnswerMap, type ChatHistoryPage, type KeybindingsSnapshot, type ModelOptions, type ProjectSkillSummary, type ProviderCatalogEntry, type TranscriptEntry, type UpdateInstallResult, type UpdateSnapshot } from "../../shared/types"
 import { NEW_CHAT_COMPOSER_ID, type ComposerState, useChatPreferencesStore } from "../stores/chatPreferencesStore"
+import { useChatInputStore } from "../stores/chatInputStore"
 import { useRightSidebarStore } from "../stores/rightSidebarStore"
 import { useTerminalLayoutStore } from "../stores/terminalLayoutStore"
 import { getEditorPresetLabel, useTerminalPreferencesStore } from "../stores/terminalPreferencesStore"
@@ -49,6 +50,62 @@ function logKannaState(message: string, details?: unknown) {
   }
 
   console.info(`[useKannaState] ${message}`, details)
+}
+
+function sameRuntime(left: ChatSnapshot["runtime"] | null | undefined, right: ChatSnapshot["runtime"] | null | undefined) {
+  if (left === right) return true
+  if (!left || !right) return false
+  return left.chatId === right.chatId
+    && left.projectId === right.projectId
+    && left.localPath === right.localPath
+    && left.title === right.title
+    && left.status === right.status
+    && left.isDraining === right.isDraining
+    && left.provider === right.provider
+    && left.planMode === right.planMode
+    && left.sessionToken === right.sessionToken
+}
+
+function sameTranscriptEntries(left: ChatSnapshot["messages"] | null | undefined, right: ChatSnapshot["messages"] | null | undefined) {
+  if (left === right) return true
+  if (!left || !right) return false
+  if (left.length !== right.length) return false
+  return left.every((entry, index) => entry._id === right[index]?._id)
+}
+
+function sameProviders(left: ProviderCatalogEntry[] | null | undefined, right: ProviderCatalogEntry[] | null | undefined) {
+  if (left === right) return true
+  if (!left || !right) return false
+  if (left.length !== right.length) return false
+  return left.every((provider, index) => provider.id === right[index]?.id)
+}
+
+function sameHistory(left: ChatSnapshot["history"] | null | undefined, right: ChatSnapshot["history"] | null | undefined) {
+  if (left === right) return true
+  if (!left || !right) return false
+  return left.hasOlder === right.hasOlder
+    && left.olderCursor === right.olderCursor
+    && left.recentLimit === right.recentLimit
+}
+
+function sameChatSnapshotCore(left: ChatSnapshot | null, right: ChatSnapshot | null) {
+  if (left === right) return true
+  if (!left || !right) return false
+  return sameRuntime(left.runtime, right.runtime)
+    && sameTranscriptEntries(left.messages, right.messages)
+    && sameHistory(left.history, right.history)
+    && sameProviders(left.availableProviders, right.availableProviders)
+}
+
+function mergeTranscriptEntries(olderHistoryEntries: TranscriptEntry[], recentEntries: TranscriptEntry[]) {
+  const deduped = new Map<string, TranscriptEntry>()
+  for (const entry of olderHistoryEntries) {
+    deduped.set(entry._id, entry)
+  }
+  for (const entry of recentEntries) {
+    deduped.set(entry._id, entry)
+  }
+  return [...deduped.values()]
 }
 
 function composerStateFromSendOptions(options?: {
@@ -104,6 +161,8 @@ export function getUiUpdateRestartReconnectAction(
 }
 
 const FIXED_TRANSCRIPT_PADDING_BOTTOM = 320
+const INITIAL_CHAT_RECENT_LIMIT = 200
+const CHAT_HISTORY_PAGE_SIZE = 500
 const UI_UPDATE_RESTART_STORAGE_KEY = "kanna:ui-update-restart"
 const LAST_SELECTED_PROJECT_STORAGE_KEY = "kanna:last-selected-project"
 let memoryLastSelectedProjectId: string | null = null
@@ -207,6 +266,8 @@ export interface KannaState {
   runtime: ChatSnapshot["runtime"] | null
   currentProjectSkills: ProjectSkillSummary[]
   availableProviders: ProviderCatalogEntry[]
+  isHistoryLoading: boolean
+  hasOlderHistory: boolean
   isProcessing: boolean
   canCancel: boolean
   isDraining: boolean
@@ -222,6 +283,7 @@ export interface KannaState {
   expandSidebar: () => void
   updateScrollState: () => void
   scrollToBottom: () => void
+  loadOlderHistory: () => Promise<void>
   handleCreateChat: (projectId: string) => Promise<void>
   handleOpenLocalProject: (localPath: string) => Promise<void>
   handleCreateProject: (project: ProjectRequest) => Promise<void>
@@ -259,6 +321,10 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [localProjects, setLocalProjects] = useState<LocalProjectsSnapshot | null>(null)
   const [updateSnapshot, setUpdateSnapshot] = useState<UpdateSnapshot | null>(null)
   const [chatSnapshot, setChatSnapshot] = useState<ChatSnapshot | null>(null)
+  const [olderHistoryEntries, setOlderHistoryEntries] = useState<TranscriptEntry[]>([])
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false)
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null)
+  const [hasOlderHistory, setHasOlderHistory] = useState(false)
   const [keybindings, setKeybindings] = useState<KeybindingsSnapshot | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<SocketStatus>("connecting")
   const [sidebarReady, setSidebarReady] = useState(false)
@@ -356,16 +422,22 @@ export function useKannaState(activeChatId: string | null): KannaState {
     }
 
     logKannaState("subscribing to chat", { activeChatId })
+    setOlderHistoryEntries([])
+    setIsHistoryLoading(false)
+    setHistoryCursor(null)
+    setHasOlderHistory(false)
     setChatSnapshot(null)
     setChatReady(false)
-    return socket.subscribe<ChatSnapshot | null>({ type: "chat", chatId: activeChatId }, (snapshot) => {
+    return socket.subscribe<ChatSnapshot | null>({ type: "chat", chatId: activeChatId, recentLimit: INITIAL_CHAT_RECENT_LIMIT }, (snapshot) => {
       logKannaState("chat snapshot received", {
         activeChatId,
         snapshotChatId: snapshot?.runtime.chatId ?? null,
         snapshotProvider: snapshot?.runtime.provider ?? null,
         snapshotStatus: snapshot?.runtime.status ?? null,
       })
-      setChatSnapshot(snapshot)
+      setChatSnapshot((current) => (sameChatSnapshotCore(current, snapshot) ? current : snapshot))
+      setHistoryCursor(snapshot?.history.olderCursor ?? null)
+      setHasOlderHistory(snapshot?.history.hasOlder ?? false)
       setChatReady(true)
       setCommandError(null)
     })
@@ -460,7 +532,11 @@ export function useKannaState(activeChatId: string | null): KannaState {
     () => getActiveChatSnapshot(chatSnapshot, activeChatId),
     [activeChatId, chatSnapshot]
   )
-  const deferredTranscriptEntries = useDeferredValue(activeChatSnapshot?.messages ?? [])
+  const transcriptEntries = useMemo(
+    () => mergeTranscriptEntries(olderHistoryEntries, activeChatSnapshot?.messages ?? []),
+    [activeChatSnapshot?.messages, olderHistoryEntries]
+  )
+  const deferredTranscriptEntries = useDeferredValue(transcriptEntries)
   useEffect(() => {
     logKannaState("active snapshot resolved", {
       routeChatId: activeChatId,
@@ -546,6 +622,30 @@ export function useKannaState(activeChatId: string | null): KannaState {
 
   function scrollToBottom() {
     enableAutoFollow("smooth")
+  }
+
+  async function loadOlderHistory() {
+    if (!activeChatId || !historyCursor || isHistoryLoading || !hasOlderHistory) {
+      return
+    }
+
+    setIsHistoryLoading(true)
+    try {
+      const page = await socket.command<ChatHistoryPage>({
+        type: "chat.loadHistory",
+        chatId: activeChatId,
+        beforeCursor: historyCursor,
+        limit: CHAT_HISTORY_PAGE_SIZE,
+      })
+      setOlderHistoryEntries((current) => mergeTranscriptEntries(page.messages, current))
+      setHistoryCursor(page.olderCursor)
+      setHasOlderHistory(page.hasOlder)
+      setCommandError(null)
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsHistoryLoading(false)
+    }
   }
 
   async function createChatForProject(projectId: string) {
@@ -924,6 +1024,8 @@ export function useKannaState(activeChatId: string | null): KannaState {
     runtime,
     currentProjectSkills,
     availableProviders,
+    isHistoryLoading,
+    hasOlderHistory,
     isProcessing,
     canCancel,
     isDraining,
@@ -939,6 +1041,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     expandSidebar: () => setSidebarCollapsed(false),
     updateScrollState,
     scrollToBottom,
+    loadOlderHistory,
     handleCreateChat,
     handleOpenLocalProject,
     handleCreateProject,
