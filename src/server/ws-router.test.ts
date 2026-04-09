@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { CodexUsageSnapshot, KeybindingsSnapshot, UpdateSnapshot } from "../shared/types"
+import type { KeybindingsSnapshot, UpdateSnapshot } from "../shared/types"
 import { PROTOCOL_VERSION } from "../shared/types"
 import { createEmptyState } from "./events"
 import { createWsRouter } from "./ws-router"
@@ -179,6 +179,63 @@ describe("ws-router", () => {
     })
   })
 
+  test("loads older chat history pages", () => {
+    const router = createWsRouter({
+      store: {
+        state: createEmptyState(),
+        getChat: () => ({ id: "chat-1" }),
+        getMessagesPageBefore: () => ({
+          messages: [{ _id: "entry-1", createdAt: 1, kind: "user_prompt", content: "hello" }],
+          hasOlder: false,
+          olderCursor: null,
+        }),
+      } as never,
+      agent: { getActiveStatuses: () => new Map(), getDrainingChatIds: () => new Set() } as never,
+      terminals: {
+        getSnapshot: () => null,
+        onEvent: () => () => {},
+      } as never,
+      keybindings: {
+        getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
+        onChange: () => () => {},
+      } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
+      refreshDiscovery: async () => [],
+      getDiscoveredProjects: () => [],
+      machineDisplayName: "Local Machine",
+      updateManager: null,
+    })
+    const ws = new FakeWebSocket()
+
+    router.handleMessage(
+      ws as never,
+      JSON.stringify({
+        v: 1,
+        type: "command",
+        id: "history-1",
+        command: {
+          type: "chat.loadHistory",
+          chatId: "chat-1",
+          beforeCursor: "idx:2",
+          limit: 100,
+        },
+      })
+    )
+
+    expect(ws.sent).toEqual([
+      {
+        v: PROTOCOL_VERSION,
+        type: "ack",
+        id: "history-1",
+        result: {
+          messages: [{ _id: "entry-1", createdAt: 1, kind: "user_prompt", content: "hello" }],
+          hasOlder: false,
+          olderCursor: null,
+        },
+      },
+    ])
+  })
+
   test("marks chats read and rebroadcasts sidebar snapshots", async () => {
     const state = createEmptyState()
     state.projectsById.set("project-1", {
@@ -200,6 +257,7 @@ describe("ws-router", () => {
       planMode: false,
       sessionToken: null,
       lastTurnOutcome: null,
+      external: null,
     })
 
     const store = {
@@ -222,6 +280,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -324,7 +383,7 @@ describe("ws-router", () => {
   })
 
   test("broadcasts background title-generation errors to connected clients", () => {
-    let reportBackgroundError: ((message: string) => void) | null = null
+    let reportBackgroundError: unknown = null
     const router = createWsRouter({
       store: { state: createEmptyState() } as never,
       agent: {
@@ -341,6 +400,7 @@ describe("ws-router", () => {
         getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
         onChange: () => () => {},
       } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
       refreshDiscovery: async () => [],
       getDiscoveredProjects: () => [],
       machineDisplayName: "Local Machine",
@@ -349,7 +409,9 @@ describe("ws-router", () => {
     const ws = new FakeWebSocket()
     router.handleOpen(ws as never)
 
-    reportBackgroundError?.("[title-generation] chat chat-1 failed")
+    if (typeof reportBackgroundError === "function") {
+      (reportBackgroundError as (message: string) => void)("[title-generation] chat chat-1 failed")
+    }
 
     expect(ws.sent).toEqual([
       {
@@ -449,15 +511,6 @@ describe("ws-router", () => {
   })
 
   test("reads codex usage through the router", () => {
-    const usageSnapshot: CodexUsageSnapshot = {
-      accountInfo: { email: "coder@example.com", subscriptionType: "pro" },
-      chatCount: 3,
-      importedChatCount: 1,
-      turnCount: 9,
-      meteredTurnCount: 7,
-      totalCostUsd: 4.25,
-      lastActiveAt: 123,
-    }
     const router = createWsRouter({
       store: {
         state: createEmptyState(),
@@ -696,5 +749,45 @@ describe("ws-router", () => {
         importedChatCount: 2,
       },
     })
+  })
+
+  test("prunes stale empty chats when a websocket opens", async () => {
+    let prunedWithActiveChatIdsJson: string | null = null
+    const router = createWsRouter({
+      store: {
+        state: createEmptyState(),
+        async pruneStaleEmptyChats(args?: { activeChatIds?: Iterable<string> }) {
+          prunedWithActiveChatIdsJson = JSON.stringify([...(args?.activeChatIds ?? [])])
+          return []
+        },
+      } as never,
+      agent: {
+        getActiveStatuses: () => new Map([["chat-running", "running"]]),
+        getDrainingChatIds: () => new Set(["chat-draining"]),
+      } as never,
+      terminals: {
+        getSnapshot: () => null,
+        onEvent: () => () => {},
+      } as never,
+      keybindings: {
+        getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
+        onChange: () => () => {},
+      } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
+      refreshDiscovery: async () => [],
+      getDiscoveredProjects: () => [],
+      machineDisplayName: "Local Machine",
+      updateManager: null,
+    })
+
+    router.handleOpen(new FakeWebSocket() as never)
+    await Promise.resolve()
+
+    if (prunedWithActiveChatIdsJson === null) {
+      throw new Error("Expected stale chat pruning to run")
+    }
+    if (prunedWithActiveChatIdsJson !== "[\"chat-running\",\"chat-draining\"]") {
+      throw new Error(`Unexpected protected chat ids: ${prunedWithActiveChatIdsJson}`)
+    }
   })
 })

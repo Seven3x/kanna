@@ -13,6 +13,8 @@ import type { UpdateManager } from "./update-manager"
 import { deriveCodexUsageSnapshot } from "./codex-usage"
 import { deriveChatSnapshot, deriveLocalProjectsSnapshot, deriveSidebarData } from "./read-models"
 
+const DEFAULT_CHAT_RECENT_LIMIT = 200
+
 export interface ClientState {
   subscriptions: Map<string, SubscriptionTopic>
 }
@@ -45,6 +47,19 @@ export function createWsRouter({
   updateManager,
 }: CreateWsRouterArgs) {
   const sockets = new Set<ServerWebSocket<ClientState>>()
+
+  function getProtectedChatIds() {
+    return new Set([
+      ...agent.getActiveStatuses().keys(),
+      ...agent.getDrainingChatIds().values(),
+    ])
+  }
+
+  async function maybePruneStaleEmptyChats() {
+    await store.pruneStaleEmptyChats?.({
+      activeChatIds: getProtectedChatIds(),
+    })
+  }
 
   function createEnvelope(id: string, topic: SubscriptionTopic): ServerEnvelope {
     if (topic.type === "sidebar") {
@@ -129,7 +144,7 @@ export function createWsRouter({
           agent.getActiveStatuses(),
           agent.getDrainingChatIds(),
           topic.chatId,
-          (chatId) => store.getMessages(chatId),
+          (chatId) => store.getRecentChatHistory(chatId, topic.recentLimit ?? DEFAULT_CHAT_RECENT_LIMIT),
           getDiscoveredProjects()
         ),
       },
@@ -346,6 +361,15 @@ export function createWsRouter({
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
           break
         }
+        case "chat.loadHistory": {
+          const chat = store.getChat(command.chatId)
+          if (!chat) {
+            throw new Error("Chat not found")
+          }
+          const page = store.getMessagesPageBefore(command.chatId, command.beforeCursor, command.limit)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: page })
+          break
+        }
         case "chat.respondTool": {
           await agent.respondTool(command)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
@@ -394,6 +418,9 @@ export function createWsRouter({
   return {
     handleOpen(ws: ServerWebSocket<ClientState>) {
       sockets.add(ws)
+      void maybePruneStaleEmptyChats().then(() => {
+        broadcastSnapshots()
+      }).catch(() => {})
     },
     handleClose(ws: ServerWebSocket<ClientState>) {
       sockets.delete(ws)

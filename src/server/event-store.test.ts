@@ -196,4 +196,76 @@ describe("EventStore", () => {
 
     expect(store.getChat("chat-1")?.unread).toBe(false)
   })
+
+  test("pages recent transcript history and loads older entries by cursor", async () => {
+    const dataDir = await createTempDataDir()
+    const store = new EventStore(dataDir)
+    await store.initialize()
+
+    const project = await store.openProject("/tmp/project")
+    const chat = await store.createChat(project.id)
+
+    await store.appendMessage(chat.id, entry("user_prompt", 100, { content: "one" }))
+    await store.appendMessage(chat.id, entry("assistant_text", 101, { content: "two" }))
+    await store.appendMessage(chat.id, entry("user_prompt", 102, { content: "three" }))
+    await store.appendMessage(chat.id, entry("assistant_text", 103, { content: "four" }))
+
+    const recent = store.getRecentChatHistory(chat.id, 2)
+    expect(recent.messages.map((message) => message._id)).toEqual([
+      "user_prompt-102",
+      "assistant_text-103",
+    ])
+    expect(recent.history).toEqual({
+      hasOlder: true,
+      olderCursor: "idx:2",
+      recentLimit: 2,
+    })
+
+    const older = store.getMessagesPageBefore(chat.id, "idx:2", 2)
+    expect(older.messages.map((message) => message._id)).toEqual([
+      "user_prompt-100",
+      "assistant_text-101",
+    ])
+    expect(older).toEqual({
+      messages: [
+        entry("user_prompt", 100, { content: "one" }),
+        entry("assistant_text", 101, { content: "two" }),
+      ],
+      hasOlder: false,
+      olderCursor: null,
+    })
+  })
+
+  test("prunes stale empty chats after five minutes", async () => {
+    const dataDir = await createTempDataDir()
+    const store = new EventStore(dataDir)
+    await store.initialize()
+
+    const project = await store.openProject("/tmp/project")
+    const chat = await store.createChat(project.id)
+    const pruned = await store.pruneStaleEmptyChats({ now: chat.createdAt + 5 * 60 * 1000 })
+
+    expect(pruned).toEqual([chat.id])
+    expect(store.getChat(chat.id)).toBeNull()
+  })
+
+  test("does not prune stale chats that are active or have messages", async () => {
+    const dataDir = await createTempDataDir()
+    const store = new EventStore(dataDir)
+    await store.initialize()
+
+    const project = await store.openProject("/tmp/project")
+    const activeChat = await store.createChat(project.id)
+    const chatWithMessages = await store.createChat(project.id)
+    await store.appendMessage(chatWithMessages.id, entry("user_prompt", chatWithMessages.createdAt + 1, { content: "hello" }))
+
+    const pruned = await store.pruneStaleEmptyChats({
+      now: activeChat.createdAt + 5 * 60 * 1000,
+      activeChatIds: [activeChat.id],
+    })
+
+    expect(pruned).toEqual([])
+    expect(store.getChat(activeChat.id)?.id).toBe(activeChat.id)
+    expect(store.getChat(chatWithMessages.id)?.id).toBe(chatWithMessages.id)
+  })
 })

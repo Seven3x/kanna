@@ -22,6 +22,7 @@ import {
 import { resolveLocalPath } from "./paths"
 
 const COMPACTION_THRESHOLD_BYTES = 2 * 1024 * 1024
+const STALE_EMPTY_CHAT_MAX_AGE_MS = 5 * 60 * 1000
 
 function normalizeExternalChatRecord(value: ExternalChatRecord): ExternalChatRecord {
   return {
@@ -69,6 +70,28 @@ interface LegacyTranscriptStats {
   sources: Array<"snapshot" | "messages_log">
   chatCount: number
   entryCount: number
+}
+
+interface TranscriptPageResult {
+  entries: TranscriptEntry[]
+  hasOlder: boolean
+  olderCursor: string | null
+}
+
+function encodeHistoryCursor(index: number) {
+  return `idx:${index}`
+}
+
+function decodeHistoryCursor(cursor: string) {
+  if (cursor.startsWith("idx:")) {
+    const value = Number.parseInt(cursor.slice("idx:".length), 10)
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error("Invalid history cursor")
+    }
+    return value
+  }
+
+  throw new Error("Invalid history cursor")
 }
 
 export class EventStore {
@@ -614,6 +637,39 @@ export class EventStore {
     await this.append(this.chatsLogPath, event)
   }
 
+  async pruneStaleEmptyChats(args?: {
+    now?: number
+    maxAgeMs?: number
+    activeChatIds?: Iterable<string>
+  }) {
+    const now = args?.now ?? Date.now()
+    const maxAgeMs = args?.maxAgeMs ?? STALE_EMPTY_CHAT_MAX_AGE_MS
+    const activeChatIds = new Set(args?.activeChatIds ?? [])
+    const prunedChatIds: string[] = []
+
+    for (const chat of this.state.chatsById.values()) {
+      if (chat.deletedAt || activeChatIds.has(chat.id)) continue
+      if (now - chat.createdAt < maxAgeMs) continue
+      if (this.getMessages(chat.id).length > 0) continue
+
+      const event: ChatEvent = {
+        v: STORE_VERSION,
+        type: "chat_deleted",
+        timestamp: now,
+        chatId: chat.id,
+      }
+      await this.append(this.chatsLogPath, event)
+
+      if (this.cachedTranscript?.chatId === chat.id) {
+        this.cachedTranscript = null
+      }
+
+      prunedChatIds.push(chat.id)
+    }
+
+    return prunedChatIds
+  }
+
   async setChatProvider(chatId: string, provider: AgentProvider) {
     const chat = this.requireChat(chatId)
     if (chat.provider === provider) return
@@ -800,6 +856,62 @@ export class EventStore {
     return cloneTranscriptEntries(entries)
   }
 
+  private getMessagesPageFromEntries(entries: TranscriptEntry[], limit: number, beforeIndex?: number): TranscriptPageResult {
+    if (entries.length === 0) {
+      return { entries: [], hasOlder: false, olderCursor: null }
+    }
+
+    const endIndex = beforeIndex === undefined ? entries.length : Math.max(0, Math.min(beforeIndex, entries.length))
+    const startIndex = Math.max(0, endIndex - limit)
+
+    return {
+      entries: cloneTranscriptEntries(entries.slice(startIndex, endIndex)),
+      hasOlder: startIndex > 0,
+      olderCursor: startIndex > 0 ? encodeHistoryCursor(startIndex) : null,
+    }
+  }
+
+  getRecentMessagesPage(chatId: string, limit: number) {
+    if (limit <= 0) {
+      return { messages: [], hasOlder: false, olderCursor: null }
+    }
+
+    const entries = this.getMessages(chatId)
+    const page = this.getMessagesPageFromEntries(entries, limit)
+    return {
+      messages: page.entries,
+      hasOlder: page.hasOlder,
+      olderCursor: page.olderCursor,
+    }
+  }
+
+  getMessagesPageBefore(chatId: string, beforeCursor: string, limit: number) {
+    if (limit <= 0) {
+      return { messages: [], hasOlder: false, olderCursor: null }
+    }
+
+    const beforeIndex = decodeHistoryCursor(beforeCursor)
+    const entries = this.getMessages(chatId)
+    const page = this.getMessagesPageFromEntries(entries, limit, beforeIndex)
+    return {
+      messages: page.entries,
+      hasOlder: page.hasOlder,
+      olderCursor: page.olderCursor,
+    }
+  }
+
+  getRecentChatHistory(chatId: string, recentLimit: number) {
+    const page = this.getRecentMessagesPage(chatId, recentLimit)
+    return {
+      messages: page.messages,
+      history: {
+        hasOlder: page.hasOlder,
+        olderCursor: page.olderCursor,
+        recentLimit,
+      },
+    }
+  }
+
   listProjects() {
     return [...this.state.projectsById.values()].filter((project) => !project.deletedAt)
   }
@@ -807,7 +919,7 @@ export class EventStore {
   listChatsByProject(projectId: string) {
     return [...this.state.chatsById.values()]
       .filter((chat) => chat.projectId === projectId && !chat.deletedAt)
-      .sort((a, b) => (b.lastMessageAt ?? b.updatedAt) - (a.lastMessageAt ?? a.updatedAt))
+      .sort((a, b) => (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt))
   }
 
   getChatCount(projectId: string) {

@@ -51,6 +51,51 @@ describe("read models", () => {
     expect(sidebar.projectGroups[0]?.chats[0]?.unread).toBe(true)
   })
 
+  test("sorts sidebar chats by last message time with created time fallback", () => {
+    const state = createEmptyState()
+    state.projectsById.set("project-1", {
+      id: "project-1",
+      localPath: "/tmp/project",
+      title: "Project",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    state.projectIdsByPath.set("/tmp/project", "project-1")
+    state.chatsById.set("chat-newer", {
+      id: "chat-newer",
+      projectId: "project-1",
+      title: "Newer empty chat",
+      createdAt: 20,
+      updatedAt: 200,
+      unread: false,
+      provider: null,
+      planMode: false,
+      sessionToken: null,
+      lastTurnOutcome: null,
+      external: null,
+    })
+    state.chatsById.set("chat-older", {
+      id: "chat-older",
+      projectId: "project-1",
+      title: "Older with message",
+      createdAt: 10,
+      updatedAt: 10,
+      unread: false,
+      provider: null,
+      planMode: false,
+      sessionToken: null,
+      lastMessageAt: 15,
+      lastTurnOutcome: null,
+      external: null,
+    })
+
+    const sidebar = deriveSidebarData(state, new Map())
+    expect(sidebar.projectGroups[0]?.chats.map((chat) => chat.chatId)).toEqual([
+      "chat-newer",
+      "chat-older",
+    ])
+  })
+
   test("includes available providers in chat snapshots", () => {
     const state = createEmptyState()
     state.projectsById.set("project-1", {
@@ -75,7 +120,10 @@ describe("read models", () => {
       external: null,
     })
 
-    const chat = deriveChatSnapshot(state, new Map(), new Set(), "chat-1", () => [], [
+    const chat = deriveChatSnapshot(state, new Map(), new Set(), "chat-1", () => ({
+      messages: [],
+      history: { hasOlder: false, olderCursor: null, recentLimit: 200 },
+    }), [
       {
         localPath: "/tmp/project",
         title: "Project",
@@ -188,6 +236,7 @@ describe("read models", () => {
       title: "Chat",
       createdAt: 1,
       updatedAt: 75,
+      unread: false,
       provider: "codex",
       planMode: false,
       sessionToken: null,
@@ -197,7 +246,10 @@ describe("read models", () => {
     })
 
     const snapshot = deriveLocalProjectsSnapshot(state, [], "Local Machine")
-    const chat = deriveChatSnapshot(state, new Map(), new Set(), "chat-1", () => [], [])
+    const chat = deriveChatSnapshot(state, new Map(), new Set(), "chat-1", () => ({
+      messages: [],
+      history: { hasOlder: false, olderCursor: null, recentLimit: 200 },
+    }), [])
 
     expect(snapshot.projects[0]?.skills).toEqual([
       {
