@@ -105,6 +105,8 @@ export function getUiUpdateRestartReconnectAction(
 
 const FIXED_TRANSCRIPT_PADDING_BOTTOM = 320
 const UI_UPDATE_RESTART_STORAGE_KEY = "kanna:ui-update-restart"
+const LAST_SELECTED_PROJECT_STORAGE_KEY = "kanna:last-selected-project"
+let memoryLastSelectedProjectId: string | null = null
 
 function getUiUpdateRestartPhase() {
   return window.sessionStorage.getItem(UI_UPDATE_RESTART_STORAGE_KEY)
@@ -116,6 +118,23 @@ function setUiUpdateRestartPhase(phase: "awaiting_disconnect" | "awaiting_reconn
 
 function clearUiUpdateRestartPhase() {
   window.sessionStorage.removeItem(UI_UPDATE_RESTART_STORAGE_KEY)
+}
+
+export function getLastSelectedProjectId() {
+  if (typeof window === "undefined") return memoryLastSelectedProjectId
+  return window.localStorage.getItem(LAST_SELECTED_PROJECT_STORAGE_KEY)
+}
+
+export function setLastSelectedProjectId(projectId: string | null) {
+  if (typeof window === "undefined") {
+    memoryLastSelectedProjectId = projectId
+    return
+  }
+  if (projectId) {
+    window.localStorage.setItem(LAST_SELECTED_PROJECT_STORAGE_KEY, projectId)
+    return
+  }
+  window.localStorage.removeItem(LAST_SELECTED_PROJECT_STORAGE_KEY)
 }
 
 export interface ProjectRequest {
@@ -196,6 +215,7 @@ export interface KannaState {
   navbarLocalPath?: string
   editorLabel: string
   hasSelectedProject: boolean
+  selectedProjectId: string | null
   openSidebar: () => void
   closeSidebar: () => void
   collapseSidebar: () => void
@@ -244,7 +264,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [sidebarReady, setSidebarReady] = useState(false)
   const [localProjectsReady, setLocalProjectsReady] = useState(false)
   const [chatReady, setChatReady] = useState(false)
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => getLastSelectedProjectId())
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [inputHeight, setInputHeight] = useState(148)
@@ -352,12 +372,25 @@ export function useKannaState(activeChatId: string | null): KannaState {
   }, [activeChatId, socket])
 
   useEffect(() => {
-    if (selectedProjectId) return
+    if (selectedProjectId && sidebarData.projectGroups.some((group) => group.groupKey === selectedProjectId)) {
+      return
+    }
+
+    const lastSelectedProjectId = getLastSelectedProjectId()
+    if (lastSelectedProjectId && sidebarData.projectGroups.some((group) => group.groupKey === lastSelectedProjectId)) {
+      setSelectedProjectId(lastSelectedProjectId)
+      return
+    }
+
     const firstGroup = sidebarData.projectGroups[0]
     if (firstGroup) {
       setSelectedProjectId(firstGroup.groupKey)
     }
   }, [selectedProjectId, sidebarData.projectGroups])
+
+  useEffect(() => {
+    setLastSelectedProjectId(selectedProjectId)
+  }, [selectedProjectId])
 
   useEffect(() => {
     if (!activeChatId) return
@@ -899,6 +932,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     navbarLocalPath,
     editorLabel,
     hasSelectedProject,
+    selectedProjectId,
     openSidebar: () => setSidebarOpen(true),
     closeSidebar: () => setSidebarOpen(false),
     collapseSidebar: () => setSidebarCollapsed(true),

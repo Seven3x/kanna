@@ -15,6 +15,7 @@ import { useProjectGroupOrderStore } from "../stores/projectGroupOrderStore"
 interface KannaSidebarProps {
   data: SidebarData
   activeChatId: string | null
+  selectedProjectId: string | null
   connectionStatus: SocketStatus
   ready: boolean
   open: boolean
@@ -36,6 +37,7 @@ interface KannaSidebarProps {
 export function KannaSidebar({
   data,
   activeChatId,
+  selectedProjectId,
   connectionStatus,
   ready,
   open,
@@ -90,6 +92,19 @@ export function KannaSidebar({
     () => new Map(data.projectGroups.map((group) => [group.localPath, group.groupKey])),
     [data.projectGroups]
   )
+  const projectGroupKeySignature = useMemo(
+    () => data.projectGroups.map((group) => group.groupKey).join("|"),
+    [data.projectGroups]
+  )
+
+  useEffect(() => {
+    const nextCollapsedSections = new Set(data.projectGroups.map((group) => group.groupKey))
+    if (selectedProjectId) {
+      nextCollapsedSections.delete(selectedProjectId)
+    }
+    setCollapsedSections(nextCollapsedSections)
+    setExpandedGroups(new Set())
+  }, [projectGroupKeySignature, selectedProjectId])
 
   const activeVisibleCount = useMemo(
     () => data.projectGroups.reduce((count, group) => count + group.chats.length, 0),

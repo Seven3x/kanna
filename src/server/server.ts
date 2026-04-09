@@ -1,5 +1,6 @@
 import path from "node:path"
 import { stat } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { APP_NAME, getRuntimeProfile } from "../shared/branding"
 import type { ChatAttachment } from "../shared/types"
 import { EventStore } from "./event-store"
@@ -19,6 +20,28 @@ import { getProjectUploadDir } from "./paths"
 const MAX_UPLOAD_FILES = 10
 const MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024
 const MAX_UPLOAD_REQUEST_SIZE_BYTES = MAX_UPLOAD_FILES * MAX_UPLOAD_SIZE_BYTES + 1024 * 1024
+const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1"])
+const ALLOWED_LAN_PREFIXES = ["10.156."]
+
+export function normalizeClientIpAddress(address: string | null | undefined) {
+  if (!address) return null
+
+  const zoneSeparatorIndex = address.indexOf("%")
+  const zoneStripped = zoneSeparatorIndex === -1 ? address : address.slice(0, zoneSeparatorIndex)
+
+  if (zoneStripped.startsWith("::ffff:")) {
+    return zoneStripped.slice("::ffff:".length)
+  }
+
+  return zoneStripped
+}
+
+export function isAllowedClientIpAddress(address: string | null | undefined) {
+  const normalized = normalizeClientIpAddress(address)
+  if (!normalized) return false
+  if (LOOPBACK_ADDRESSES.has(normalized)) return true
+  return ALLOWED_LAN_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+}
 
 function getRequestContentLength(req: Request) {
   const rawValue = req.headers.get("content-length")
@@ -70,6 +93,7 @@ export interface StartKannaServerOptions {
   port?: number
   host?: string
   strictPort?: boolean
+  dataDir?: string
   onMigrationProgress?: (message: string) => void
   update?: {
     version: string
@@ -78,15 +102,48 @@ export interface StartKannaServerOptions {
   }
 }
 
+export function isStaleTemporaryProjectPath(localPath: string) {
+  const temporaryProjectPrefix = path.join(tmpdir(), "kanna-project-")
+  return localPath.startsWith(temporaryProjectPrefix)
+}
+
+export async function cleanupStaleTemporaryProjects(store: EventStore) {
+  const staleProjects = await Promise.all(
+    store.listProjects().map(async (project) => {
+      if (!isStaleTemporaryProjectPath(project.localPath)) {
+        return null
+      }
+
+      try {
+        const projectStat = await stat(project.localPath)
+        if (projectStat.isDirectory()) {
+          return null
+        }
+      } catch {
+        return project
+      }
+
+      return project
+    })
+  )
+
+  await Promise.all(
+    staleProjects
+      .filter((project): project is NonNullable<typeof project> => project !== null)
+      .map((project) => store.removeProject(project.id))
+  )
+}
+
 export async function startKannaServer(options: StartKannaServerOptions = {}) {
   const port = options.port ?? 3210
-  const hostname = options.host ?? "127.0.0.1"
+  const hostname = options.host ?? "0.0.0.0"
   const strictPort = options.strictPort ?? false
-  const store = new EventStore()
+  const store = new EventStore(options.dataDir)
   const codexHistory = new CodexHistoryImporter()
   const machineDisplayName = getMachineDisplayName()
   await store.initialize()
   await store.migrateLegacyTranscripts(options.onMigrationProgress)
+  await cleanupStaleTemporaryProjects(store)
   let discoveredProjects: DiscoveredProject[] = []
 
   async function refreshDiscovery() {
@@ -138,6 +195,11 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
         port: actualPort,
         hostname,
         async fetch(req, serverInstance) {
+          const requestIp = serverInstance.requestIP(req)?.address ?? null
+          if (!isAllowedClientIpAddress(requestIp)) {
+            return Response.json({ error: "Access denied" }, { status: 403 })
+          }
+
           const url = new URL(req.url)
 
           if (url.pathname === "/ws") {

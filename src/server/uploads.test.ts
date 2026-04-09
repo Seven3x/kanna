@@ -16,11 +16,14 @@ afterEach(async () => {
 })
 
 async function startTestServer() {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "kanna-server-test-data-"))
+  tempDirs.push(dataDir)
+
   for (let attempt = 0; attempt < 20; attempt++) {
     const port = 20000 + Math.floor(Math.random() * 20000)
 
     try {
-      return await startKannaServer({ port, strictPort: true })
+      return await startKannaServer({ port, host: "127.0.0.1", strictPort: true, dataDir })
     } catch (error) {
       const code = typeof error === "object" && error && "code" in error ? error.code : null
       if (code !== "EADDRINUSE" || attempt === 19) {
@@ -182,7 +185,7 @@ describe("uploads", () => {
         fallbackMimeType: "text/plain",
       })
 
-      const response = await fetch(`http://localhost:${server.port}${attachment.contentUrl}`)
+      const response = await fetch(`http://127.0.0.1:${server.port}${attachment.contentUrl}`)
       expect(response.status).toBe(200)
       expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8")
       expect(await response.text()).toBe("hello from upload")
@@ -207,7 +210,7 @@ describe("uploads", () => {
         fallbackMimeType: "video/mp2t",
       })
 
-      const response = await fetch(`http://localhost:${server.port}${attachment.contentUrl}`)
+      const response = await fetch(`http://127.0.0.1:${server.port}${attachment.contentUrl}`)
       expect(response.status).toBe(200)
       expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8")
       expect(await response.text()).toContain("export const value = 1")
@@ -232,7 +235,7 @@ describe("uploads", () => {
         fallbackMimeType: "text/plain",
       })
 
-      const response = await fetch(`http://localhost:${server.port}${attachment.contentUrl}`, { method: "POST" })
+      const response = await fetch(`http://127.0.0.1:${server.port}${attachment.contentUrl}`, { method: "POST" })
       expect(response.status).toBe(405)
       expect(response.headers.get("allow")).toBe("GET")
     } finally {
@@ -251,7 +254,7 @@ describe("uploads", () => {
       const formData = new FormData()
       formData.append("files", new File([new Uint8Array(25 * 1024 * 1024 + 1)], "big.bin", { type: "application/octet-stream" }))
 
-      const response = await fetch(`http://localhost:${server.port}/api/projects/${project.id}/uploads`, {
+      const response = await fetch(`http://127.0.0.1:${server.port}/api/projects/${project.id}/uploads`, {
         method: "POST",
         body: formData,
       })
@@ -330,7 +333,7 @@ describe("uploads", () => {
         fallbackMimeType: "text/plain",
       })
 
-      const deleteUrl = `http://localhost:${server.port}${attachment.contentUrl.replace(/\/content$/, "")}`
+      const deleteUrl = `http://127.0.0.1:${server.port}${attachment.contentUrl.replace(/\/content$/, "")}`
       const response = await fetch(deleteUrl, { method: "DELETE" })
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ ok: true })

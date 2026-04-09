@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import {
+  getLastSelectedProjectId,
   getActiveChatSnapshot,
   getNewestRemainingChatId,
   getUiUpdateRestartReconnectAction,
   resolveComposeIntent,
+  setLastSelectedProjectId,
   shouldAutoFollowTranscript,
 } from "./useKannaState"
 import type { ChatSnapshot, SidebarData } from "../../shared/types"
@@ -122,6 +124,16 @@ describe("getUiUpdateRestartReconnectAction", () => {
     expect(getUiUpdateRestartReconnectAction(null, "connected")).toBe("none")
     expect(getUiUpdateRestartReconnectAction("awaiting_disconnect", "connected")).toBe("none")
     expect(getUiUpdateRestartReconnectAction("awaiting_reconnect", "disconnected")).toBe("none")
+  })
+})
+
+describe("selected project persistence", () => {
+  test("stores and clears the last selected project id", () => {
+    setLastSelectedProjectId("project-2")
+    expect(getLastSelectedProjectId()).toBe("project-2")
+
+    setLastSelectedProjectId(null)
+    expect(getLastSelectedProjectId()).toBeNull()
   })
 })
 

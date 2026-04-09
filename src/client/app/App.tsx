@@ -76,6 +76,7 @@ function KannaLayout() {
         }}
         editorLabel={state.editorLabel}
         keybindings={state.keybindings}
+        selectedProjectId={state.selectedProjectId}
       />
       <Outlet context={state} />
     </div>
