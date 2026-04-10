@@ -10,6 +10,7 @@ import { discoverProjects, type DiscoveredProject } from "./discovery"
 import { KeybindingsManager } from "./keybindings"
 import { getMachineDisplayName } from "./machine-name"
 import { handleProjectFilesRequest } from "./project-files"
+import { handleProjectGitRequest } from "./project-git"
 import { TerminalManager } from "./terminal-manager"
 import { UpdateManager } from "./update-manager"
 import type { UpdateInstallAttemptResult } from "./cli-runtime"
@@ -218,6 +219,11 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
           const projectFilesResponse = await handleProjectFilesRequest(req, store)
           if (projectFilesResponse) {
             return projectFilesResponse
+          }
+
+          const projectGitResponse = await handleProjectGitRequest(req, store)
+          if (projectGitResponse) {
+            return projectGitResponse
           }
 
           const uploadResponse = await handleProjectUpload(req, url, store)

@@ -113,7 +113,7 @@ describe("processTranscriptMessages", () => {
     expect(messages[0].attachments?.[0]?.relativePath).toBe("./.kanna/uploads/spec.pdf")
   })
 
-  test("hydrates hidden context window usage updates", () => {
+  test("filters hidden context window usage updates from hydrated messages", () => {
     const messages = processTranscriptMessages([
       entry({
         kind: "context_window_updated",
@@ -126,10 +126,7 @@ describe("processTranscriptMessages", () => {
       }),
     ])
 
-    expect(messages[0]?.kind).toBe("context_window_updated")
-    if (messages[0]?.kind !== "context_window_updated") throw new Error("unexpected message")
-    expect(messages[0].hidden).toBe(true)
-    expect(messages[0].usage.usedTokens).toBe(2048)
+    expect(messages).toEqual([])
   })
 
   test("preserves structured Claude ask-user-question results when a later echoed tool result arrives", () => {

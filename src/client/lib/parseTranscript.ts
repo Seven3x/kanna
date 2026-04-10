@@ -324,11 +324,8 @@ export function processTranscriptMessages(entries: TranscriptEntry[]): HydratedT
         })
         break
       case "context_window_updated":
-        messages.push({
-          ...createBaseMessage(entry),
-          kind: "context_window_updated",
-          usage: entry.usage,
-        })
+        // Keep raw usage entries in the transcript snapshot for the meter,
+        // but do not surface them through hydrated message render paths.
         break
       case "compact_boundary":
         messages.push({
