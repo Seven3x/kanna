@@ -1,0 +1,107 @@
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { readCodexAuthSnapshot, switchCodexAuthAccount } from "./codex-accounts"
+
+function encodeBase64Url(value: string) {
+  return Buffer.from(value, "utf8").toString("base64url")
+}
+
+function buildChatgptAuthJson(email: string, plan: string, accountId: string, userId: string) {
+  const payload = {
+    email,
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: accountId,
+      chatgpt_plan_type: plan,
+      chatgpt_user_id: userId,
+    },
+  }
+
+  return JSON.stringify({
+    auth_mode: "chatgpt",
+    tokens: {
+      id_token: `${encodeBase64Url(JSON.stringify({ alg: "none", typ: "JWT" }))}.${encodeBase64Url(JSON.stringify(payload))}.sig`,
+      access_token: `access-${email}`,
+      refresh_token: `refresh-${email}`,
+      account_id: accountId,
+    },
+    last_refresh: "2026-04-11T10:00:00Z",
+  }, null, 2)
+}
+
+describe("codex-accounts", () => {
+  let homeDir = ""
+
+  afterEach(async () => {
+    if (homeDir) {
+      await rm(homeDir, { recursive: true, force: true })
+    }
+  })
+
+  test("reads saved account snapshots and marks the active one", async () => {
+    homeDir = await mkdtemp(path.join(tmpdir(), "kanna-codex-auth-"))
+    const codexHome = path.join(homeDir, ".codex")
+    const accountsDir = path.join(codexHome, "accounts")
+    await mkdir(accountsDir, { recursive: true })
+
+    const alpha = buildChatgptAuthJson("alpha@example.com", "pro", "acc-alpha", "user-alpha")
+    const beta = buildChatgptAuthJson("beta@example.com", "team", "acc-beta", "user-beta")
+
+    await writeFile(path.join(accountsDir, "alpha.auth.json"), alpha, "utf8")
+    await writeFile(path.join(accountsDir, "beta.auth.json"), beta, "utf8")
+    await writeFile(path.join(accountsDir, "registry.json"), JSON.stringify({
+      active_account_key: "user-beta::acc-beta",
+      active_account_activated_at_ms: 1_777_000_000_000,
+      accounts: [
+        {
+          account_key: "user-alpha::acc-alpha",
+          email: "alpha@example.com",
+          last_used_at: 1_777_100_000,
+          last_local_rollout: { event_timestamp_ms: 1_777_100_111_000 },
+        },
+        {
+          account_key: "user-beta::acc-beta",
+          email: "beta@example.com",
+          last_used_at: 1_777_200_000,
+          last_local_rollout: { event_timestamp_ms: 1_777_200_222_000 },
+        },
+      ],
+    }, null, 2), "utf8")
+    await writeFile(path.join(codexHome, "auth.json"), beta, "utf8")
+
+    const snapshot = await readCodexAuthSnapshot(homeDir)
+
+    expect(snapshot.hasActiveAuth).toBe(true)
+    expect(snapshot.activeEmail).toBe("beta@example.com")
+    expect(snapshot.activeAccountId).toBe("beta.auth.json")
+    expect(snapshot.accounts[0]?.lastActivatedAt).toBe(1_777_000_000_000)
+    expect(snapshot.accounts[0]?.lastChattedAt).toBe(1_777_200_222_000)
+    expect(snapshot.accounts[1]?.lastActivatedAt).toBeNull()
+    expect(snapshot.accounts[1]?.lastChattedAt).toBe(1_777_100_111_000)
+    expect(snapshot.accounts.map((account) => [account.id, account.isActive])).toEqual([
+      ["beta.auth.json", true],
+      ["alpha.auth.json", false],
+    ])
+  })
+
+  test("switches auth.json to the requested snapshot", async () => {
+    homeDir = await mkdtemp(path.join(tmpdir(), "kanna-codex-switch-"))
+    const codexHome = path.join(homeDir, ".codex")
+    const accountsDir = path.join(codexHome, "accounts")
+    await mkdir(accountsDir, { recursive: true })
+
+    const alpha = buildChatgptAuthJson("alpha@example.com", "pro", "acc-alpha", "user-alpha")
+    const beta = buildChatgptAuthJson("beta@example.com", "team", "acc-beta", "user-beta")
+
+    await writeFile(path.join(accountsDir, "alpha.auth.json"), alpha, "utf8")
+    await writeFile(path.join(accountsDir, "beta.auth.json"), beta, "utf8")
+    await writeFile(path.join(codexHome, "auth.json"), alpha, "utf8")
+
+    const snapshot = await switchCodexAuthAccount("beta.auth.json", homeDir)
+
+    expect(snapshot.activeAccountId).toBe("beta.auth.json")
+    expect(snapshot.activeEmail).toBe("beta@example.com")
+    expect(snapshot.accounts.find((account) => account.id === "beta.auth.json")?.isActive).toBe(true)
+  })
+})

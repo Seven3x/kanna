@@ -1,5 +1,6 @@
 import type {
   AgentProvider,
+  CodexAuthSnapshot,
   ChatAttachment,
   ChatHistoryPage,
   ChatSnapshot,
@@ -53,6 +54,8 @@ export type ClientCommand =
   | { type: "update.install" }
   | { type: "settings.readKeybindings" }
   | { type: "settings.readCodexUsage" }
+  | { type: "settings.readCodexAccounts" }
+  | { type: "settings.switchCodexAccount"; accountId: string }
   | { type: "settings.writeKeybindings"; bindings: KeybindingsSnapshot["bindings"] }
   | {
       type: "system.openExternal"
@@ -103,6 +106,7 @@ export type ServerSnapshot =
 export type ServerCommandResult =
   | KeybindingsSnapshot
   | CodexUsageSnapshot
+  | CodexAuthSnapshot
 
 export type ServerEnvelope =
   | { v: 1; type: "snapshot"; id: string; snapshot: ServerSnapshot }

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { ChatInput, getClipboardImageFiles, getStoredLockedComposerState, resolvePlanModeState, willExceedAttachmentLimit } from "./ChatInput"
+import { ChatInput, getClipboardImageFiles, getStoredLockedComposerState, resolveLockedComposerState, resolvePlanModeState, willExceedAttachmentLimit } from "./ChatInput"
 import { useChatPreferencesStore } from "../../stores/chatPreferencesStore"
 import { useChatInputStore } from "../../stores/chatInputStore"
 import { PROVIDERS } from "../../../shared/types"
@@ -66,7 +66,7 @@ describe("resolvePlanModeState", () => {
     })
   })
 
-  test("initializes locked Codex state from provider defaults instead of current composer settings", () => {
+  test("initializes locked Codex state from the stored composer settings when the provider matches", () => {
     const result = resolvePlanModeState({
       providerLocked: true,
       planMode: false,
@@ -92,7 +92,7 @@ describe("resolvePlanModeState", () => {
     expect(result.lockedComposerState).toEqual({
       provider: "codex",
       model: "gpt-5.4",
-      modelOptions: { reasoningEffort: "high", fastMode: false },
+      modelOptions: { reasoningEffort: "xhigh", fastMode: true },
       planMode: false,
     })
   })
@@ -129,6 +129,46 @@ describe("resolvePlanModeState", () => {
       provider: "claude",
       model: "opus",
       modelOptions: { reasoningEffort: "high", contextWindow: "200k" },
+      planMode: false,
+    })
+  })
+})
+
+describe("resolveLockedComposerState", () => {
+  test("prefers the persisted chat composer state when the provider already matches", () => {
+    expect(resolveLockedComposerState({
+      activeProvider: "codex",
+      composerState: {
+        provider: "codex",
+        model: "gpt-5.4",
+        modelOptions: { reasoningEffort: "xhigh", fastMode: true },
+        planMode: true,
+      },
+      providerDefaults: INITIAL_STATE.providerDefaults,
+      lockedComposerState: null,
+    })).toEqual({
+      provider: "codex",
+      model: "gpt-5.4",
+      modelOptions: { reasoningEffort: "xhigh", fastMode: true },
+      planMode: true,
+    })
+  })
+
+  test("falls back to provider defaults when the stored composer uses another provider", () => {
+    expect(resolveLockedComposerState({
+      activeProvider: "codex",
+      composerState: {
+        provider: "claude",
+        model: "opus",
+        modelOptions: { reasoningEffort: "high", contextWindow: "200k" },
+        planMode: false,
+      },
+      providerDefaults: INITIAL_STATE.providerDefaults,
+      lockedComposerState: null,
+    })).toEqual({
+      provider: "codex",
+      model: "gpt-5.4",
+      modelOptions: { reasoningEffort: "high", fastMode: false },
       planMode: false,
     })
   })

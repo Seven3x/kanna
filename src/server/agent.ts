@@ -566,6 +566,16 @@ export class AgentCoordinator {
     return new Set(this.drainingStreams.keys())
   }
 
+  async restartCodexSessions() {
+    const activeCodexChatIds = [...this.activeTurns.values()]
+      .filter((turn) => turn.provider === "codex")
+      .map((turn) => turn.chatId)
+
+    await Promise.allSettled(activeCodexChatIds.map((chatId) => this.cancel(chatId)))
+    this.codexManager.stopAll()
+    this.onStateChange()
+  }
+
   async stopDraining(chatId: string) {
     const draining = this.drainingStreams.get(chatId)
     if (!draining) return

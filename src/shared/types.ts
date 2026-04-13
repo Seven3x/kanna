@@ -69,6 +69,28 @@ export interface CodexModelOptions {
   fastMode: boolean
 }
 
+export type CodexAuthMode = "chatgpt" | "apikey"
+
+export interface CodexAuthAccountSummary {
+  id: string
+  email: string | null
+  plan: string | null
+  authMode: CodexAuthMode
+  isActive: boolean
+  isAvailable: boolean
+  lastRefresh: string | null
+  lastActivatedAt: number | null
+  lastChattedAt: number | null
+}
+
+export interface CodexAuthSnapshot {
+  codexHome: string
+  hasActiveAuth: boolean
+  activeAccountId: string | null
+  activeEmail: string | null
+  accounts: CodexAuthAccountSummary[]
+}
+
 export interface ProviderModelOptionsByProvider {
   claude: ClaudeModelOptions
   codex: CodexModelOptions

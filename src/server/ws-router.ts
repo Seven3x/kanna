@@ -11,6 +11,7 @@ import { ensureProjectDirectory } from "./paths"
 import { TerminalManager } from "./terminal-manager"
 import type { UpdateManager } from "./update-manager"
 import { deriveCodexUsageSnapshot } from "./codex-usage"
+import { readCodexAuthSnapshot, switchCodexAuthAccount } from "./codex-accounts"
 import { deriveChatSnapshot, deriveLocalProjectsSnapshot, deriveSidebarData } from "./read-models"
 
 const DEFAULT_CHAT_RECENT_LIMIT = 200
@@ -268,6 +269,21 @@ export function createWsRouter({
             result: deriveCodexUsageSnapshot(store.state, (chatId) => store.getMessages(chatId)),
           })
           return
+        }
+        case "settings.readCodexAccounts": {
+          send(ws, {
+            v: PROTOCOL_VERSION,
+            type: "ack",
+            id,
+            result: await readCodexAuthSnapshot(),
+          })
+          return
+        }
+        case "settings.switchCodexAccount": {
+          const snapshot = await switchCodexAuthAccount(command.accountId)
+          await agent.restartCodexSessions()
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
+          break
         }
         case "settings.writeKeybindings": {
           const snapshot = await keybindings.write(command.bindings)
