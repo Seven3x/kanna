@@ -112,6 +112,13 @@ interface SnapshotBroadcastFilter {
   terminalIds?: Set<string>
 }
 
+interface SnapshotComputationCache {
+  sidebar?: {
+    data: ReturnType<typeof deriveSidebarData>
+    signature: string
+  }
+}
+
 function send(ws: ServerWebSocket<ClientState>, message: ServerEnvelope) {
   const payload = JSON.stringify(message)
   ws.send(payload)
@@ -241,28 +248,50 @@ export function createWsRouter({
     return true
   }
 
-  function createEnvelope(id: string, topic: SubscriptionTopic): ServerEnvelope {
+  function getSidebarSnapshotCacheEntry(cache?: SnapshotComputationCache) {
+    if (cache?.sidebar) {
+      return cache.sidebar
+    }
+
+    const startedAt = performance.now()
+    const data = deriveSidebarData(store.state, agent.getActiveStatuses())
+    if (isSendToStartingProfilingEnabled()) {
+      const totalChats = data.projectGroups.reduce((count, group) => count + group.chats.length, 0)
+      console.log("[kanna/send->starting][server]", JSON.stringify({
+        stage: "ws.sidebar_snapshot_built",
+        elapsedMs: Number((performance.now() - startedAt).toFixed(1)),
+        projectGroupCount: data.projectGroups.length,
+        chatCount: totalChats,
+        totalChatCount: store.state.chatsById.size,
+        totalProjectCount: store.state.projectsById.size,
+      }))
+    }
+
+    const sidebar = {
+      data,
+      signature: JSON.stringify({
+        type: "sidebar" as const,
+        data,
+      }),
+    }
+
+    if (cache) {
+      cache.sidebar = sidebar
+    }
+
+    return sidebar
+  }
+
+  function createEnvelope(id: string, topic: SubscriptionTopic, cache?: SnapshotComputationCache): ServerEnvelope {
     if (topic.type === "sidebar") {
-      const startedAt = performance.now()
-      const data = deriveSidebarData(store.state, agent.getActiveStatuses())
-      if (isSendToStartingProfilingEnabled()) {
-        const totalChats = data.projectGroups.reduce((count, group) => count + group.chats.length, 0)
-        console.log("[kanna/send->starting][server]", JSON.stringify({
-          stage: "ws.sidebar_snapshot_built",
-          elapsedMs: Number((performance.now() - startedAt).toFixed(1)),
-          projectGroupCount: data.projectGroups.length,
-          chatCount: totalChats,
-          totalChatCount: store.state.chatsById.size,
-          totalProjectCount: store.state.projectsById.size,
-        }))
-      }
+      const sidebar = getSidebarSnapshotCacheEntry(cache)
       return {
         v: PROTOCOL_VERSION,
         type: "snapshot",
         id,
         snapshot: {
           type: "sidebar",
-          data,
+          data: sidebar.data,
         },
       }
     }
@@ -360,7 +389,7 @@ export function createWsRouter({
 
   async function pushSnapshots(
     ws: ServerWebSocket<ClientState>,
-    options?: { skipPrune?: boolean; filter?: SnapshotBroadcastFilter }
+    options?: { skipPrune?: boolean; filter?: SnapshotBroadcastFilter; cache?: SnapshotComputationCache }
   ) {
     const pushStartedAt = performance.now()
     if (!options?.skipPrune) {
@@ -374,11 +403,13 @@ export function createWsRouter({
         continue
       }
       const envelopeStartedAt = performance.now()
-      const envelope = createEnvelope(id, topic)
+      const envelope = createEnvelope(id, topic, options?.cache)
       const createdAt = performance.now()
       if (envelope.type !== "snapshot") continue
-      const signature = JSON.stringify(envelope.snapshot)
-      const signatureReadyAt = performance.now()
+      const signature = topic.type === "sidebar"
+        ? getSidebarSnapshotCacheEntry(options?.cache).signature
+        : JSON.stringify(envelope.snapshot)
+      const signatureReadyAt = topic.type === "sidebar" ? createdAt : performance.now()
       if (snapshotSignatures.get(id) === signature) {
         skippedCount += 1
         continue
@@ -420,9 +451,10 @@ export function createWsRouter({
   async function broadcastSnapshots() {
     const startedAt = performance.now()
     let socketCount = 0
+    const cache: SnapshotComputationCache = {}
     for (const ws of sockets) {
       socketCount += 1
-      await pushSnapshots(ws, { skipPrune: true })
+      await pushSnapshots(ws, { skipPrune: true, cache })
     }
     if (isSendToStartingProfilingEnabled()) {
       console.log("[kanna/send->starting][server]", JSON.stringify({
@@ -439,9 +471,10 @@ export function createWsRouter({
   async function broadcastFilteredSnapshots(filter: SnapshotBroadcastFilter) {
     const startedAt = performance.now()
     let socketCount = 0
+    const cache: SnapshotComputationCache = {}
     for (const ws of sockets) {
       socketCount += 1
-      await pushSnapshots(ws, { skipPrune: true, filter })
+      await pushSnapshots(ws, { skipPrune: true, filter, cache })
     }
     if (isSendToStartingProfilingEnabled()) {
       console.log("[kanna/send->starting][server]", JSON.stringify({
@@ -672,6 +705,12 @@ export function createWsRouter({
           await store.removeProject(command.projectId)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
           break
+        }
+        case "sidebar.reorderProjectGroups": {
+          await store.setSidebarProjectOrder(command.projectIds)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
+          await broadcastFilteredSnapshots({ includeSidebar: true })
+          return
         }
         case "project.readDiffPatch": {
           const project = store.getProject(command.projectId)

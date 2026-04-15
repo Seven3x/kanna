@@ -521,6 +521,7 @@ export interface KannaState {
   handleStopDraining: () => Promise<void>
   handleDeleteChat: (chat: SidebarChatRow) => Promise<void>
   handleRemoveProject: (projectId: string) => Promise<void>
+  handleReorderProjectGroups: (projectIds: string[]) => Promise<void>
   handleCopyPath: (localPath: string) => Promise<void>
   handleOpenExternal: (action: "open_finder" | "open_terminal" | "open_editor") => Promise<void>
   handleOpenExternalPath: (action: "open_finder" | "open_editor", localPath: string) => Promise<void>
@@ -1398,6 +1399,15 @@ export function useKannaState(activeChatId: string | null): KannaState {
     }
   }, [dialog, navigate, runtime?.projectId, sidebarData.projectGroups, socket])
 
+  const handleReorderProjectGroups = useCallback(async (projectIds: string[]) => {
+    try {
+      await socket.command({ type: "sidebar.reorderProjectGroups", projectIds })
+      setCommandError(null)
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    }
+  }, [socket])
+
   const openExternal = useCallback(async (command: {
     action: "open_finder" | "open_terminal" | "open_editor"
     localPath: string
@@ -1580,6 +1590,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     handleStopDraining,
     handleDeleteChat,
     handleRemoveProject,
+    handleReorderProjectGroups,
     handleCopyPath,
     handleOpenExternal,
     handleOpenExternalPath,

@@ -189,6 +189,9 @@ function KannaLayout() {
   const handleSidebarRemoveProject = useCallback((projectId: string) => {
     void state.handleRemoveProject(projectId)
   }, [state.handleRemoveProject])
+  const handleSidebarReorderProjectGroups = useCallback((projectIds: string[]) => {
+    void state.handleReorderProjectGroups(projectIds)
+  }, [state.handleReorderProjectGroups])
   const handleOpenChangelog = useCallback(() => {
     navigate("/settings/changelog")
   }, [navigate])
@@ -213,6 +216,7 @@ function KannaLayout() {
       onCopyPath={handleSidebarCopyPath}
       onOpenExternalPath={handleSidebarOpenExternalPath}
       onRemoveProject={handleSidebarRemoveProject}
+      onReorderProjectGroups={handleSidebarReorderProjectGroups}
       editorLabel={state.editorLabel}
       updateSnapshot={state.updateSnapshot}
       onOpenChangelog={handleOpenChangelog}
@@ -224,6 +228,7 @@ function KannaLayout() {
     handleSidebarCreateChat,
     handleSidebarDeleteChat,
     handleSidebarOpenExternalPath,
+    handleSidebarReorderProjectGroups,
     handleSidebarRemoveProject,
     showMobileOpenButton,
     state.activeChatId,
