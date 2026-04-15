@@ -161,18 +161,15 @@ describe("shouldMarkActiveChatRead", () => {
 })
 
 describe("getUiUpdateRestartReconnectAction", () => {
-  test("waits for reconnect after the socket disconnects", () => {
-    expect(getUiUpdateRestartReconnectAction("awaiting_disconnect", "disconnected")).toBe("awaiting_reconnect")
-  })
-
-  test("reloads the app after reconnect", () => {
-    expect(getUiUpdateRestartReconnectAction("awaiting_reconnect", "connected")).toBe("reload_app")
+  test("waits for server readiness after the socket disconnects", () => {
+    expect(getUiUpdateRestartReconnectAction("awaiting_disconnect", "disconnected")).toBe("awaiting_server_ready")
   })
 
   test("does nothing for unrelated phase and connection combinations", () => {
     expect(getUiUpdateRestartReconnectAction(null, "connected")).toBe("none")
     expect(getUiUpdateRestartReconnectAction("awaiting_disconnect", "connected")).toBe("none")
-    expect(getUiUpdateRestartReconnectAction("awaiting_reconnect", "disconnected")).toBe("none")
+    expect(getUiUpdateRestartReconnectAction("awaiting_server_ready", "disconnected")).toBe("none")
+    expect(getUiUpdateRestartReconnectAction("awaiting_server_ready", "connected")).toBe("none")
   })
 })
 

@@ -366,13 +366,9 @@ export function shouldAutoFollowTranscript(distanceFromBottom: number) {
 export function getUiUpdateRestartReconnectAction(
   phase: string | null,
   connectionStatus: SocketStatus
-): "none" | "awaiting_reconnect" | "reload_app" {
+): "none" | "awaiting_server_ready" {
   if (phase === "awaiting_disconnect" && connectionStatus === "disconnected") {
-    return "awaiting_reconnect"
-  }
-
-  if (phase === "awaiting_reconnect" && connectionStatus === "connected") {
-    return "reload_app"
+    return "awaiting_server_ready"
   }
 
   return "none"
@@ -394,7 +390,7 @@ function getUiUpdateRestartPhase() {
   return window.sessionStorage.getItem(UI_UPDATE_RESTART_STORAGE_KEY)
 }
 
-function setUiUpdateRestartPhase(phase: "awaiting_disconnect" | "awaiting_reconnect") {
+function setUiUpdateRestartPhase(phase: "awaiting_disconnect" | "awaiting_server_ready") {
   window.sessionStorage.setItem(UI_UPDATE_RESTART_STORAGE_KEY, phase)
 }
 
@@ -416,6 +412,18 @@ function getLastHandledUiUpdateReloadRequest() {
 
 function setLastHandledUiUpdateReloadRequest(reloadRequestedAt: number) {
   window.sessionStorage.setItem(UI_UPDATE_RELOAD_REQUEST_STORAGE_KEY, String(reloadRequestedAt))
+}
+
+async function isServerReady() {
+  const response = await fetch("/health", {
+    method: "GET",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+    },
+  })
+
+  return response.ok
 }
 
 export interface ProjectRequest {
@@ -622,21 +630,51 @@ export function useKannaState(activeChatId: string | null): KannaState {
     }
 
     setLastHandledUiUpdateReloadRequest(reloadRequestedAt)
-    clearUiUpdateRestartPhase()
-    window.location.reload()
+    setUiUpdateRestartPhase("awaiting_disconnect")
   }, [updateSnapshot?.reloadRequestedAt])
 
   useEffect(() => {
     const phase = getUiUpdateRestartPhase()
     const reconnectAction = getUiUpdateRestartReconnectAction(phase, connectionStatus)
-    if (reconnectAction === "awaiting_reconnect") {
-      setUiUpdateRestartPhase("awaiting_reconnect")
+    if (reconnectAction === "awaiting_server_ready") {
+      setUiUpdateRestartPhase("awaiting_server_ready")
+      return
+    }
+  }, [connectionStatus])
+
+  useEffect(() => {
+    if (getUiUpdateRestartPhase() !== "awaiting_server_ready") {
       return
     }
 
-    if (reconnectAction === "reload_app") {
-      clearUiUpdateRestartPhase()
-      window.location.reload()
+    let cancelled = false
+    let timeoutId: number | null = null
+
+    const pollServerReadiness = async () => {
+      try {
+        if (await isServerReady()) {
+          if (cancelled) return
+          clearUiUpdateRestartPhase()
+          window.location.reload()
+          return
+        }
+      } catch {
+        // Keep polling while the process restarts.
+      }
+
+      if (cancelled) return
+      timeoutId = window.setTimeout(() => {
+        void pollServerReadiness()
+      }, 500)
+    }
+
+    void pollServerReadiness()
+
+    return () => {
+      cancelled = true
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
     }
   }, [connectionStatus])
 
