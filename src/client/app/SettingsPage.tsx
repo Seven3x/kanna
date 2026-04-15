@@ -11,6 +11,9 @@ import {
   MessageSquareQuote,
   Settings2,
   Sun,
+  Download,
+  Cloud,
+  DownloadCloud,
 } from "lucide-react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -288,16 +291,16 @@ export function ChangelogSection({
               key={release.id}
               className={cn(
                 "rounded-xl border bg-card/30 pl-6 pr-4 py-4",
-                isLatestRelease ? "border-primary/30 bg-primary/5" : "border-border"
+                isLatestRelease ? "border-border bg-muted" : "border-border"
               )}
             >
 
             <div className="flex flex-row items-center min-w-0 flex-1 gap-3 ">
-              <div className="flex flex-row items-center min-w-0 flex-1 gap-3 ">
+              <div className="flex flex-row items-center min-w-0 flex-1 gap-2 ">
                 <div className="text-lg font-semibold tracking-[-0.2px] text-foreground">
                   {release.name?.trim() || release.tag_name}
                 </div>
-                <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>{formatPublishedDate(release.published_at)}</span>
                   {release.prerelease ? (
                     <span className="rounded-full border border-border px-2.5 py-1 uppercase tracking-wide">
@@ -310,14 +313,16 @@ export function ChangelogSection({
 
 
               <div className="flex flex-row items-center justify-end min-w-0 flex-1 gap-2 ">
-                <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                {/* <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   
                   <span className="rounded-full bg-muted px-2.5 py-1 font-mono text-foreground/80">
                     {release.tag_name}
                   </span>
-                </div>
+                </div> */}
 
-                <a
+             
+            
+                  <a
                   href={release.html_url}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -329,16 +334,8 @@ export function ChangelogSection({
                 >
                   <GitHubIcon className="h-4 w-4" />
                 </a>
-                { isLatestRelease && canInstallUpdate ? (
-                  <SettingsHeaderButton
-                    variant="default"
-                    onClick={onInstallUpdate}
-                    disabled={isUpdating}
-                  >
-                    {isUpdating ? "Updating…" : "Update"}
-                  </SettingsHeaderButton>
-                ) : null}
-                {isCurrentRelease ? (
+
+                  {isCurrentRelease ? (
                       
                   <span
                     className={cn(
@@ -350,6 +347,21 @@ export function ChangelogSection({
                     Current
                   </span>
                   ) : null}
+                  
+                
+                  { isLatestRelease && canInstallUpdate  ? (
+                  <SettingsHeaderButton
+                    variant="default"
+                    className=""
+                    onClick={onInstallUpdate}
+                    disabled={isUpdating}
+                  >
+                    <div className="flex flex-row items-center justify-center gap-2">
+                    <DownloadCloud className="size-4"/>
+                    {isUpdating ? "Updating…" : "Update"}
+                    </div>
+                  </SettingsHeaderButton>
+                ) : null}
               </div>
             
              
