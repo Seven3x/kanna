@@ -17,7 +17,7 @@ import { Button } from "../ui/button"
 import { Textarea } from "../ui/textarea"
 import { ScrollArea } from "../ui/scroll-area"
 import { cn } from "../../lib/utils"
-import { type ContextWindowSnapshot, overrideContextWindowMaxTokens } from "../../lib/contextWindow"
+import { type ContextWindowSnapshot, type ContextWindowUsageHistoryEntry, overrideContextWindowMaxTokens } from "../../lib/contextWindow"
 import { useIsStandalone } from "../../hooks/useIsStandalone"
 import { useChatInputStore } from "../../stores/chatInputStore"
 import { NEW_CHAT_COMPOSER_ID, type ComposerState, useChatPreferencesStore } from "../../stores/chatPreferencesStore"
@@ -113,6 +113,8 @@ interface Props {
   availableProviders: ProviderCatalogEntry[]
   skills?: ProjectSkillSummary[]
   contextWindowSnapshot?: ContextWindowSnapshot | null
+  contextWindowHistory?: ContextWindowUsageHistoryEntry[]
+  sessionToken?: string | null
 }
 
 export interface ChatInputHandle {
@@ -237,6 +239,8 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
   availableProviders,
   skills = [],
   contextWindowSnapshot = null,
+  contextWindowHistory = [],
+  sessionToken = null,
 }, forwardedRef) {
   const {
     getDraft,
@@ -1161,17 +1165,11 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
           />
           {activeContextWindow ? (
             <div className="mx-[13px] flex items-center md:hidden">
-              <ContextWindowMeter usage={activeContextWindow} />
+              <ContextWindowMeter usage={activeContextWindow} sessionToken={sessionToken} history={contextWindowHistory} />
             </div>
           ) : null}
           <div className="min-w-3" />
         </div>
-
-        {activeContextWindow ? (
-          <div className="absolute right-[29px] top-1/2 hidden -translate-y-1/2 translate-x-1/2 md:block">
-            <ContextWindowMeter usage={activeContextWindow} />
-          </div>
-        ) : null}
       </div>
 
       <AttachmentPreviewModal attachment={selectedAttachment} onOpenChange={(open) => !open && setSelectedAttachmentId(null)} />

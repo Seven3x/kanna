@@ -517,6 +517,22 @@ export interface ResultEntry extends TranscriptEntryBase {
   durationMs: number
   result: string
   costUsd?: number
+  retryAction?: ResultRetryAction
+  autoRecovery?: ResultAutoRecovery
+}
+
+export interface ResultRetryAction {
+  type: "send_message"
+  label: string
+  content: string
+  provider?: AgentProvider
+}
+
+export interface ResultAutoRecovery {
+  type: "codex_usage_limit_switch"
+  switchedAccountId: string
+  switchedAccountEmail: string | null
+  notice: string
 }
 
 export interface StatusEntry extends TranscriptEntryBase {
@@ -711,7 +727,20 @@ export type HydratedTranscriptMessage =
   | ({ kind: "system_init"; model: string; tools: string[]; agents: string[]; slashCommands: string[]; mcpServers: McpServerInfo[]; provider: AgentProvider; id: string; messageId?: string; timestamp: string; hidden?: boolean; debugRaw?: string })
   | ({ kind: "account_info"; accountInfo: AccountInfo; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "assistant_text"; text: string; id: string; messageId?: string; timestamp: string; hidden?: boolean })
-  | ({ kind: "result"; success: boolean; cancelled?: boolean; result: string; durationMs: number; costUsd?: number; id: string; messageId?: string; timestamp: string; hidden?: boolean })
+  | ({
+      kind: "result"
+      success: boolean
+      cancelled?: boolean
+      result: string
+      durationMs: number
+      costUsd?: number
+      retryAction?: ResultRetryAction
+      autoRecovery?: ResultAutoRecovery
+      id: string
+      messageId?: string
+      timestamp: string
+      hidden?: boolean
+    })
   | ({ kind: "status"; status: string; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "context_window_updated"; usage: ContextWindowUsageSnapshot; id: string; messageId?: string; timestamp: string; hidden?: boolean })
   | ({ kind: "compact_boundary"; id: string; messageId?: string; timestamp: string; hidden?: boolean })

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { readCodexAuthSnapshot, switchCodexAuthAccount } from "./codex-accounts"
+import { readCodexAuthSnapshot, switchCodexAuthAccount, switchToNextCodexAuthAccount } from "./codex-accounts"
 
 function encodeBase64Url(value: string) {
   return Buffer.from(value, "utf8").toString("base64url")
@@ -103,5 +103,84 @@ describe("codex-accounts", () => {
     expect(snapshot.activeAccountId).toBe("beta.auth.json")
     expect(snapshot.activeEmail).toBe("beta@example.com")
     expect(snapshot.accounts.find((account) => account.id === "beta.auth.json")?.isActive).toBe(true)
+    expect(snapshot.accounts.find((account) => account.id === "beta.auth.json")?.lastActivatedAt).toEqual(expect.any(Number))
+  })
+
+  test("switches to the least recently activated alternate account", async () => {
+    homeDir = await mkdtemp(path.join(tmpdir(), "kanna-codex-next-"))
+    const codexHome = path.join(homeDir, ".codex")
+    const accountsDir = path.join(codexHome, "accounts")
+    await mkdir(accountsDir, { recursive: true })
+
+    const alpha = buildChatgptAuthJson("alpha@example.com", "pro", "acc-alpha", "user-alpha")
+    const beta = buildChatgptAuthJson("beta@example.com", "team", "acc-beta", "user-beta")
+    const gamma = buildChatgptAuthJson("gamma@example.com", "pro", "acc-gamma", "user-gamma")
+
+    await writeFile(path.join(accountsDir, "alpha.auth.json"), alpha, "utf8")
+    await writeFile(path.join(accountsDir, "beta.auth.json"), beta, "utf8")
+    await writeFile(path.join(accountsDir, "gamma.auth.json"), gamma, "utf8")
+    await writeFile(path.join(accountsDir, "registry.json"), JSON.stringify({
+      active_account_key: "user-alpha::acc-alpha",
+      active_account_activated_at_ms: 1_777_000_000_000,
+      accounts: [
+        {
+          account_key: "user-alpha::acc-alpha",
+          email: "alpha@example.com",
+          last_local_rollout: { event_timestamp_ms: 1_777_000_000_000 },
+        },
+        {
+          account_key: "user-beta::acc-beta",
+          email: "beta@example.com",
+          last_local_rollout: { event_timestamp_ms: 1_777_200_000_000 },
+        },
+        {
+          account_key: "user-gamma::acc-gamma",
+          email: "gamma@example.com",
+          last_local_rollout: { event_timestamp_ms: 1_777_100_000_000 },
+        },
+      ],
+    }, null, 2), "utf8")
+    await writeFile(path.join(codexHome, "accounts-state.json"), JSON.stringify({
+      "beta.auth.json": {
+        lastActivatedAt: 1_777_200_000_000,
+      },
+      "gamma.auth.json": {
+        lastActivatedAt: 1_777_100_000_000,
+      },
+    }, null, 2), "utf8")
+    await writeFile(path.join(codexHome, "auth.json"), alpha, "utf8")
+
+    const result = await switchToNextCodexAuthAccount(homeDir)
+
+    expect(result).not.toBeNull()
+    expect(result?.switchedAccount.id).toBe("gamma.auth.json")
+    expect(result?.switchedAccount.email).toBe("gamma@example.com")
+    expect(result?.snapshot.activeAccountId).toBe("gamma.auth.json")
+  })
+
+  test("prefers accounts that have never been activated before dated ones", async () => {
+    homeDir = await mkdtemp(path.join(tmpdir(), "kanna-codex-never-"))
+    const codexHome = path.join(homeDir, ".codex")
+    const accountsDir = path.join(codexHome, "accounts")
+    await mkdir(accountsDir, { recursive: true })
+
+    const alpha = buildChatgptAuthJson("alpha@example.com", "pro", "acc-alpha", "user-alpha")
+    const beta = buildChatgptAuthJson("beta@example.com", "team", "acc-beta", "user-beta")
+    const gamma = buildChatgptAuthJson("gamma@example.com", "pro", "acc-gamma", "user-gamma")
+
+    await writeFile(path.join(accountsDir, "alpha.auth.json"), alpha, "utf8")
+    await writeFile(path.join(accountsDir, "beta.auth.json"), beta, "utf8")
+    await writeFile(path.join(accountsDir, "gamma.auth.json"), gamma, "utf8")
+    await writeFile(path.join(codexHome, "accounts-state.json"), JSON.stringify({
+      "beta.auth.json": {
+        lastActivatedAt: 1_777_200_000_000,
+      },
+    }, null, 2), "utf8")
+    await writeFile(path.join(codexHome, "auth.json"), alpha, "utf8")
+
+    const result = await switchToNextCodexAuthAccount(homeDir)
+
+    expect(result).not.toBeNull()
+    expect(result?.switchedAccount.id).toBe("gamma.auth.json")
   })
 })

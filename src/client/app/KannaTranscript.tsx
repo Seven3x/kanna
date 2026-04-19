@@ -185,6 +185,8 @@ function sameMessage(left: HydratedTranscriptMessage, right: HydratedTranscriptM
         && left.result === right.result
         && left.durationMs === right.durationMs
         && left.costUsd === right.costUsd
+        && JSON.stringify(left.retryAction) === JSON.stringify(right.retryAction)
+        && JSON.stringify(left.autoRecovery) === JSON.stringify(right.autoRecovery)
     case "status":
       return right.kind === "status" && left.status === right.status
     case "context_window_updated":
@@ -349,6 +351,7 @@ interface KannaTranscriptProps {
   scrollContainerRef?: RefObject<HTMLDivElement | null>
   onOpenLocalLink: (target: { path: string; line?: number; column?: number }) => void
   onOpenProjectFile?: (path: string) => void
+  onRetryResult?: (message: Extract<HydratedTranscriptMessage, { kind: "result" }>) => Promise<void> | void
   onAskUserQuestionSubmit: (
     toolUseId: string,
     questions: AskUserQuestionItem[],
@@ -360,6 +363,7 @@ interface KannaTranscriptProps {
 interface KannaTranscriptRowProps {
   row: ResolvedTranscriptRow
   onOpenProjectFile?: (filePath: string) => void
+  onRetryResult?: KannaTranscriptProps["onRetryResult"]
   onAskUserQuestionSubmit: (
     toolUseId: string,
     questions: AskUserQuestionItem[],
@@ -419,11 +423,13 @@ const TranscriptToolGroup = memo(function TranscriptToolGroup({
 const TranscriptSingleRow = memo(function TranscriptSingleRow({
   row,
   onOpenProjectFile,
+  onRetryResult,
   onAskUserQuestionSubmit,
   onExitPlanModeConfirm,
 }: {
   row: ResolvedSingleTranscriptRow
   onOpenProjectFile?: (filePath: string) => void
+  onRetryResult?: KannaTranscriptProps["onRetryResult"]
   onAskUserQuestionSubmit: KannaTranscriptRowProps["onAskUserQuestionSubmit"]
   onExitPlanModeConfirm: KannaTranscriptRowProps["onExitPlanModeConfirm"]
 }) {
@@ -481,7 +487,7 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
         )
         break
       case "result":
-        rendered = row.hideResult ? null : <ResultMessage message={row.message} />
+        rendered = row.hideResult ? null : <ResultMessage message={row.message} onRetry={onRetryResult} />
         break
       case "interrupted":
         rendered = <InterruptedMessage message={row.message} />
@@ -526,6 +532,7 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
   && prev.row.isFinalStatus === next.row.isFinalStatus
   && sameMessage(prev.row.message, next.row.message)
   && prev.onOpenProjectFile === next.onOpenProjectFile
+  && prev.onRetryResult === next.onRetryResult
   && prev.onAskUserQuestionSubmit === next.onAskUserQuestionSubmit
   && prev.onExitPlanModeConfirm === next.onExitPlanModeConfirm
 ))
@@ -533,6 +540,7 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
 const KannaTranscriptRow = memo(function KannaTranscriptRow({
   row,
   onOpenProjectFile,
+  onRetryResult,
   onAskUserQuestionSubmit,
   onExitPlanModeConfirm,
 }: KannaTranscriptRowProps) {
@@ -544,12 +552,14 @@ const KannaTranscriptRow = memo(function KannaTranscriptRow({
     <TranscriptSingleRow
       row={row}
       onOpenProjectFile={onOpenProjectFile}
+      onRetryResult={onRetryResult}
       onAskUserQuestionSubmit={onAskUserQuestionSubmit}
       onExitPlanModeConfirm={onExitPlanModeConfirm}
     />
   )
 }, (prev, next) => {
   if (prev.onOpenProjectFile !== next.onOpenProjectFile) return false
+  if (prev.onRetryResult !== next.onRetryResult) return false
   if (prev.onAskUserQuestionSubmit !== next.onAskUserQuestionSubmit) return false
   if (prev.onExitPlanModeConfirm !== next.onExitPlanModeConfirm) return false
   if (prev.row.kind !== next.row.kind) return false
@@ -596,6 +606,7 @@ export const KannaTranscript = memo(function KannaTranscript({
   scrollContainerRef,
   onOpenLocalLink,
   onOpenProjectFile,
+  onRetryResult,
   onAskUserQuestionSubmit,
   onExitPlanModeConfirm,
 }: KannaTranscriptProps) {
@@ -748,6 +759,7 @@ export const KannaTranscript = memo(function KannaTranscript({
                     setMeasurementVersion((value) => value + 1)
                   }}
                   onOpenProjectFile={onOpenProjectFile}
+                  onRetryResult={onRetryResult}
                   onAskUserQuestionSubmit={onAskUserQuestionSubmit}
                   onExitPlanModeConfirm={onExitPlanModeConfirm}
                 />
@@ -760,6 +772,7 @@ export const KannaTranscript = memo(function KannaTranscript({
             <KannaTranscriptRow
               row={row}
               onOpenProjectFile={onOpenProjectFile}
+              onRetryResult={onRetryResult}
               onAskUserQuestionSubmit={onAskUserQuestionSubmit}
               onExitPlanModeConfirm={onExitPlanModeConfirm}
             />
@@ -788,6 +801,7 @@ const MeasuredTranscriptRow = memo(function MeasuredTranscriptRow({
   top,
   onMeasure,
   onOpenProjectFile,
+  onRetryResult,
   onAskUserQuestionSubmit,
   onExitPlanModeConfirm,
 }: {
@@ -795,6 +809,7 @@ const MeasuredTranscriptRow = memo(function MeasuredTranscriptRow({
   top: number
   onMeasure: (height: number) => void
   onOpenProjectFile?: (filePath: string) => void
+  onRetryResult?: KannaTranscriptProps["onRetryResult"]
   onAskUserQuestionSubmit: KannaTranscriptRowProps["onAskUserQuestionSubmit"]
   onExitPlanModeConfirm: KannaTranscriptRowProps["onExitPlanModeConfirm"]
 }) {
@@ -823,6 +838,7 @@ const MeasuredTranscriptRow = memo(function MeasuredTranscriptRow({
         <KannaTranscriptRow
           row={row}
           onOpenProjectFile={onOpenProjectFile}
+          onRetryResult={onRetryResult}
           onAskUserQuestionSubmit={onAskUserQuestionSubmit}
           onExitPlanModeConfirm={onExitPlanModeConfirm}
         />

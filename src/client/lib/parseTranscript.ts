@@ -314,6 +314,8 @@ export function processTranscriptMessages(entries: TranscriptEntry[]): HydratedT
           result: entry.result,
           durationMs: entry.durationMs,
           costUsd: entry.costUsd,
+          retryAction: entry.retryAction,
+          autoRecovery: entry.autoRecovery,
         })
         break
       case "status":

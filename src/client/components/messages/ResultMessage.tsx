@@ -1,11 +1,15 @@
+import { useState } from "react"
 import type { ProcessedResultMessage } from "./types"
 import { MetaRow, MetaLabel } from "./shared"
 
 interface Props {
   message: ProcessedResultMessage
+  onRetry?: (message: ProcessedResultMessage) => Promise<void> | void
 }
 
-export function ResultMessage({ message }: Props) {
+export function ResultMessage({ message, onRetry }: Props) {
+  const [isRetrying, setIsRetrying] = useState(false)
+
   const formatDuration = (ms: number) => {
     if (ms < 1000) {
       return `${ms}ms`
@@ -28,9 +32,33 @@ export function ResultMessage({ message }: Props) {
   }
 
   if (!message.success) {
+    const canRetry = Boolean(message.retryAction && onRetry)
     return (
-      <div className="px-4 py-3 mx-2 my-1 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
-        {message.result || "An unknown error occurred."}
+      <div className="relative px-4 py-3 pr-24 mx-2 my-1 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+        {canRetry ? (
+          <button
+            type="button"
+            disabled={isRetrying}
+            onClick={async () => {
+              if (!onRetry || isRetrying) return
+              setIsRetrying(true)
+              try {
+                await onRetry(message)
+              } finally {
+                setIsRetrying(false)
+              }
+            }}
+            className="absolute right-3 top-3 rounded-md border border-destructive/30 bg-background/90 px-3 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-background disabled:cursor-default disabled:opacity-60"
+          >
+            {isRetrying ? "Retrying..." : (message.retryAction?.label ?? "Retry")}
+          </button>
+        ) : null}
+        <div>{message.result || "An unknown error occurred."}</div>
+        {message.autoRecovery ? (
+          <div className="mt-3 text-xs leading-5 text-foreground/80">
+            {message.autoRecovery.notice}
+          </div>
+        ) : null}
       </div>
     )
   }

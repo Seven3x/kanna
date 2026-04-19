@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Download, File, Folder, FolderOpen, RefreshCcw, Upload } from "lucide-react"
+import { ChevronLeft, ChevronRight, Download, File, FilePenLine, Folder, FolderOpen, RefreshCcw, Upload } from "lucide-react"
 import { buildProjectFileRawUrl, fetchProjectFileList, getParentProjectFilePath, uploadProjectFiles } from "../../lib/projectFiles"
 import { cn } from "../../lib/utils"
 import type { ProjectFileListResponse } from "../../../shared/project-files"
@@ -8,6 +8,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../ui/resi
 import { ScrollArea } from "../ui/scroll-area"
 import { ProjectFilePreviewPanel } from "./ProjectFilePreviewPanel"
 import { ProjectFilePreviewDialog } from "../messages/ProjectFilePreviewDialog"
+import { ProjectTextFileEditorDialog } from "../messages/ProjectTextFileEditorDialog"
 
 interface ProjectFilesSidebarProps {
   projectId: string
@@ -42,6 +43,7 @@ export function ProjectFilesSidebar({
   const [currentPath, setCurrentPath] = useState("")
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
   const [dialogFilePath, setDialogFilePath] = useState<string | null>(null)
+  const [agentsDialogOpen, setAgentsDialogOpen] = useState(false)
   const [directoryState, setDirectoryState] = useState<DirectoryState>({ status: "loading" })
   const [refreshKey, setRefreshKey] = useState(0)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -201,6 +203,17 @@ export function ProjectFilesSidebar({
             <Button
               type="button"
               variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg px-2.5"
+              aria-label="Open AGENTS.md"
+              onClick={() => setAgentsDialogOpen(true)}
+            >
+              <FilePenLine className="mr-1.5 h-3.5 w-3.5" />
+              AGENTS.md
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
               size="icon-sm"
               aria-label="Upload files"
               title="Upload files"
@@ -272,6 +285,19 @@ export function ProjectFilesSidebar({
           onOpenInEditor={onOpenInEditor}
         />
       ) : null}
+      <ProjectTextFileEditorDialog
+        open={agentsDialogOpen}
+        onOpenChange={setAgentsDialogOpen}
+        projectId={projectId}
+        filePath="AGENTS.md"
+        title="Edit AGENTS.md"
+        onSaved={() => {
+          setCurrentPath("")
+          setSelectedFilePath("AGENTS.md")
+          setRefreshKey((value) => value + 1)
+        }}
+        onOpenInEditor={onOpenInEditor}
+      />
     </div>
   )
 }

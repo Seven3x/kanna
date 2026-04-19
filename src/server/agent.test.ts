@@ -1161,6 +1161,91 @@ describe("AgentCoordinator codex integration", () => {
     expect(postCancelTextMessages.length).toBe(messageCountBefore)
   })
 
+  test("usage-limit codex errors auto-switch accounts and expose a retry action", async () => {
+    let stopSessionChatId: string | null = null
+    const fakeCodexManager = {
+      async startSession() {},
+      stopSession(chatId: string) {
+        stopSessionChatId = chatId
+      },
+      async startTurn(): Promise<HarnessTurn> {
+        async function* stream() {
+          yield {
+            type: "transcript" as const,
+            entry: timestamped({
+              kind: "result",
+              subtype: "error",
+              isError: true,
+              durationMs: 0,
+              result: "You've hit your usage limit. Upgrade to Pro or try again later.",
+            }),
+          }
+        }
+
+        return {
+          provider: "codex",
+          stream: stream(),
+          interrupt: async () => {},
+          close: () => {},
+        }
+      },
+    }
+
+    const store = createFakeStore({ sessionToken: "session-1", allowTurnFailure: true })
+    const coordinator = new AgentCoordinator({
+      store: store as never,
+      onStateChange: () => {},
+      codexManager: fakeCodexManager as never,
+      autoSwitchCodexAccount: async () => ({
+        snapshot: {
+          codexHome: "/tmp/.codex",
+          hasActiveAuth: true,
+          activeAccountId: "beta.auth.json",
+          activeEmail: "beta@example.com",
+          accounts: [],
+        },
+        switchedAccount: {
+          id: "beta.auth.json",
+          email: "beta@example.com",
+          plan: "pro",
+          authMode: "chatgpt",
+          isActive: true,
+          isAvailable: true,
+          lastRefresh: null,
+          lastActivatedAt: null,
+          lastChattedAt: null,
+        },
+      }),
+    })
+
+    await coordinator.send({
+      type: "chat.send",
+      chatId: "chat-1",
+      provider: "codex",
+      content: "continue",
+      model: "gpt-5.4",
+    })
+
+    await waitFor(() => store.failedErrors.length === 1)
+
+    const resultEntry = store.messages.find((entry) => entry.kind === "result")
+    expect(resultEntry).toBeDefined()
+    if (!resultEntry || resultEntry.kind !== "result") {
+      throw new Error("missing result entry")
+    }
+    expect(resultEntry.retryAction).toEqual({
+      type: "send_message",
+      label: "Retry",
+      content: "继续",
+      provider: "codex",
+    })
+    expect(resultEntry.autoRecovery?.type).toBe("codex_usage_limit_switch")
+    expect(resultEntry.autoRecovery?.switchedAccountEmail).toBe("beta@example.com")
+    expect(resultEntry.autoRecovery?.notice).toContain("Click Retry")
+    expect(stopSessionChatId === "chat-1").toBe(true)
+    expect(store.chat.sessionToken).toBe("session-1")
+  })
+
   test("cancelling a waiting codex exit-plan prompt discards it without starting a follow-up turn", async () => {
     let releaseInterrupt!: () => void
     const interrupted = new Promise<void>((resolve) => {
@@ -1257,14 +1342,14 @@ describe("AgentCoordinator codex integration", () => {
   })
 })
 
-function createFakeStore(options?: { localPath?: string }) {
+function createFakeStore(options?: { localPath?: string; sessionToken?: string | null; allowTurnFailure?: boolean }) {
   const chat = {
     id: "chat-1",
     projectId: "project-1",
     title: "New Chat",
     provider: null as "claude" | "codex" | null,
     planMode: false,
-    sessionToken: null as string | null,
+    sessionToken: options?.sessionToken ?? null as string | null,
   }
   const project = {
     id: "project-1",
@@ -1273,6 +1358,7 @@ function createFakeStore(options?: { localPath?: string }) {
   return {
     chat,
     turnFinishedCount: 0,
+    failedErrors: [] as string[],
     messages: [] as TranscriptEntry[],
     requireChat(chatId: string) {
       expect(chatId).toBe("chat-1")
@@ -1301,8 +1387,11 @@ function createFakeStore(options?: { localPath?: string }) {
     async recordTurnFinished() {
       this.turnFinishedCount += 1
     },
-    async recordTurnFailed() {
-      throw new Error("Did not expect turn failure")
+    async recordTurnFailed(_chatId: string, error: string) {
+      if (!options?.allowTurnFailure) {
+        throw new Error("Did not expect turn failure")
+      }
+      this.failedErrors.push(error)
     },
     async recordTurnCancelled() {},
     async setSessionToken(_chatId: string, sessionToken: string | null) {

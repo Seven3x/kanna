@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { listProjectDirectory, previewProjectFile, uploadProjectFiles } from "./project-files"
+import { listProjectDirectory, previewProjectFile, uploadProjectFiles, writeProjectFileContent } from "./project-files"
 import type { EventStore } from "./event-store"
 
 const tempDirs: string[] = []
@@ -74,5 +74,15 @@ describe("project file helpers", () => {
 
     expect(result.uploaded).toEqual(["assets/greeting.txt"])
     expect(await readFile(path.join(projectRoot, "assets", "greeting.txt"), "utf8")).toBe("hello")
+  })
+
+  test("writes and creates a text file inside the project root", async () => {
+    const projectRoot = await createTempProject()
+
+    const result = await writeProjectFileContent(createStore("project-1", projectRoot), "project-1", "AGENTS.md", "# Project Agents\n")
+
+    expect(result.path).toBe("AGENTS.md")
+    expect(result.created).toBe(true)
+    expect(await readFile(path.join(projectRoot, "AGENTS.md"), "utf8")).toBe("# Project Agents\n")
   })
 })

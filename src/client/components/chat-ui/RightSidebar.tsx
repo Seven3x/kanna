@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
-import { ChevronDown, ExternalLink, GitBranch, History, Sparkles, X } from "lucide-react"
+import { type ReactNode, useEffect, useState } from "react"
+import { ChevronDown, ExternalLink, FilePenLine, GitBranch, History, Sparkles, X } from "lucide-react"
 import type { ProjectGitCommitDetail, ProjectGitSnapshot } from "../../../shared/project-git"
 import type { ProjectSkillSummary } from "../../../shared/types"
 import { fetchProjectGitCommitDetail, fetchProjectGitSnapshot } from "../../lib/projectGit"
@@ -8,6 +8,7 @@ import { cn } from "../../lib/utils"
 import { Button } from "../ui/button"
 import { ScrollArea } from "../ui/scroll-area"
 import { ProjectFilesSidebar } from "./ProjectFilesSidebar"
+import { ProjectTextFileEditorDialog } from "../messages/ProjectTextFileEditorDialog"
 
 function splitPathForDisplay(filePath: string) {
   const normalized = filePath.replaceAll("\\", "/")
@@ -93,26 +94,31 @@ function SectionHeader({
   expanded,
   onToggle,
   icon: Icon,
+  trailing,
 }: {
   title: string
   count?: number
   expanded: boolean
   onToggle: () => void
   icon?: typeof Sparkles
+  trailing?: ReactNode
 }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-accent/40"
-    >
-      {Icon ? <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : null}
-      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{title}</span>
-      {typeof count === "number" ? (
-        <span className="text-[11px] text-muted-foreground">{count}</span>
-      ) : null}
-      <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !expanded && "-rotate-90")} />
-    </button>
+    <div className="flex items-center gap-1 px-2 py-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent/40"
+      >
+        {Icon ? <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : null}
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{title}</span>
+        {typeof count === "number" ? (
+          <span className="text-[11px] text-muted-foreground">{count}</span>
+        ) : null}
+        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !expanded && "-rotate-90")} />
+      </button>
+      {trailing ? <div className="shrink-0">{trailing}</div> : null}
+    </div>
   )
 }
 
@@ -216,6 +222,7 @@ export function RightSidebar({ projectId, localPath, skills = [], onClose, onOpe
   const [gitExpanded, setGitExpanded] = useState(false)
   const [gitHistoryExpanded, setGitHistoryExpanded] = useState(false)
   const [filesExpanded, setFilesExpanded] = useState(false)
+  const [agentsDialogOpen, setAgentsDialogOpen] = useState(false)
   const [expandedSkillKey, setExpandedSkillKey] = useState<string | null>(null)
   const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(null)
   const [gitState, setGitState] = useState<
@@ -499,6 +506,21 @@ export function RightSidebar({ projectId, localPath, skills = [], onClose, onOpe
               title="Files"
               expanded={filesExpanded}
               onToggle={() => setFilesExpanded((current) => !current)}
+              trailing={(
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 rounded-md px-2 text-xs"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setAgentsDialogOpen(true)
+                  }}
+                >
+                  <FilePenLine className="mr-1.5 h-3.5 w-3.5" />
+                  AGENTS.md
+                </Button>
+              )}
             />
           </div>
           {filesExpanded ? (
@@ -514,6 +536,17 @@ export function RightSidebar({ projectId, localPath, skills = [], onClose, onOpe
             </div>
           ) : null}
         </div>
+        <ProjectTextFileEditorDialog
+          open={agentsDialogOpen}
+          onOpenChange={setAgentsDialogOpen}
+          projectId={projectId}
+          filePath="AGENTS.md"
+          title="Edit AGENTS.md"
+          onSaved={() => setFilesExpanded(true)}
+          onOpenInEditor={onOpenInEditor && localPath
+            ? (filePath) => onOpenInEditor(resolveProjectLocalFilePath(localPath, filePath))
+            : undefined}
+        />
       </div>
     </div>
   )

@@ -39,4 +39,10 @@ describe("RightSidebar", () => {
     expect(markup).not.toContain("Component workflow helper.")
     expect(markup).not.toContain(".agents/skills/shadcn/SKILL.md")
   })
+
+  test("renders an AGENTS.md quick action even when files are collapsed", () => {
+    const markup = renderToStaticMarkup(createElement(RightSidebar, { projectId: "project-1", onClose: () => {} }))
+
+    expect(markup).toContain("AGENTS.md")
+  })
 })

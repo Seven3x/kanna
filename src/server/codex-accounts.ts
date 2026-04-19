@@ -33,6 +33,12 @@ interface RegistryFile {
   accounts?: RegistryAccountRecord[]
 }
 
+interface AccountStateRecord {
+  lastActivatedAt?: unknown
+}
+
+type AccountsStateFile = Record<string, AccountStateRecord>
+
 function defaultParsedAuthFile(): ParsedAuthFile {
   return {
     email: null,
@@ -146,6 +152,33 @@ async function readRegistryFile(accountsDir: string) {
   }
 }
 
+async function readAccountsStateFile(codexHome: string): Promise<AccountsStateFile> {
+  const statePath = path.join(codexHome, "accounts-state.json")
+  try {
+    const contents = await fs.readFile(statePath, "utf8")
+    const payload = JSON.parse(contents) as unknown
+    const root = readObject(payload)
+    if (!root) return {}
+
+    const normalized: AccountsStateFile = {}
+    for (const [accountId, record] of Object.entries(root)) {
+      normalized[accountId] = readObject(record) ?? {}
+    }
+    return normalized
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      return {}
+    }
+    return {}
+  }
+}
+
+async function writeAccountsStateFile(codexHome: string, state: AccountsStateFile) {
+  const statePath = path.join(codexHome, "accounts-state.json")
+  await fs.mkdir(codexHome, { recursive: true })
+  await fs.writeFile(statePath, JSON.stringify(state, null, 2), "utf8")
+}
+
 function isActiveAccount(candidate: CodexAccountFileSummary, activeAuth: ParsedAuthFile | null) {
   if (!activeAuth) return false
   if (candidate.recordKey && activeAuth.recordKey && candidate.recordKey === activeAuth.recordKey) return true
@@ -154,12 +187,13 @@ function isActiveAccount(candidate: CodexAccountFileSummary, activeAuth: ParsedA
   return false
 }
 
-async function readAccountsDirectory(accountsDir: string, activeAuth: ParsedAuthFile | null) {
+async function readAccountsDirectory(accountsDir: string, activeAuth: ParsedAuthFile | null, codexHome: string) {
   const entries = await fs.readdir(accountsDir, { withFileTypes: true }).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return []
     throw error
   })
   const registry = await readRegistryFile(accountsDir)
+  const accountsState = await readAccountsStateFile(codexHome)
   const registryAccounts = Array.isArray(registry?.accounts) ? registry.accounts : []
   const activeAccountKey = readString(registry?.active_account_key)
   const activeActivatedAt = readNumber(registry?.active_account_activated_at_ms)
@@ -178,8 +212,11 @@ async function readAccountsDirectory(accountsDir: string, activeAuth: ParsedAuth
           const candidateEmail = normalizeEmail(readString(candidate?.email))
           return Boolean(parsed.email && candidateEmail && parsed.email === candidateEmail)
         })
+        const savedState = readObject(accountsState[entry.name])
+        const savedLastActivatedAt = readNumber(savedState?.lastActivatedAt)
         const lastLocalRollout = readObject(registryRecord?.last_local_rollout)
         const lastUsedAt = secondsToMilliseconds(readNumber(registryRecord?.last_used_at))
+        const derivedLastActivatedAt = parsed.recordKey && activeAccountKey === parsed.recordKey ? activeActivatedAt : null
         const summary: CodexAccountFileSummary = {
           id: entry.name,
           email: parsed.email,
@@ -188,7 +225,7 @@ async function readAccountsDirectory(accountsDir: string, activeAuth: ParsedAuth
           isActive: false,
           isAvailable: true,
           lastRefresh: parsed.lastRefresh,
-          lastActivatedAt: parsed.recordKey && activeAccountKey === parsed.recordKey ? activeActivatedAt : null,
+          lastActivatedAt: Math.max(savedLastActivatedAt ?? 0, derivedLastActivatedAt ?? 0) || null,
           lastChattedAt: readNumber(lastLocalRollout?.event_timestamp_ms) ?? lastUsedAt,
           absolutePath,
           recordKey: parsed.recordKey,
@@ -222,7 +259,7 @@ export async function readCodexAuthSnapshot(homeDir?: string): Promise<CodexAuth
     }
   }
 
-  const accounts = await readAccountsDirectory(accountsDir, activeAuth)
+  const accounts = await readAccountsDirectory(accountsDir, activeAuth, codexHome)
   const activeAccount = accounts.find((account) => account.isActive) ?? null
 
   return {
@@ -248,5 +285,50 @@ export async function switchCodexAuthAccount(accountId: string, homeDir?: string
   const sourceContents = await fs.readFile(sourcePath, "utf8")
   await fs.mkdir(codexHome, { recursive: true })
   await fs.writeFile(authPath, sourceContents, "utf8")
+  const accountState = await readAccountsStateFile(codexHome)
+  accountState[accountId] = {
+    ...readObject(accountState[accountId]),
+    lastActivatedAt: Date.now(),
+  }
+  await writeAccountsStateFile(codexHome, accountState)
   return readCodexAuthSnapshot(homeDir)
+}
+
+function compareAccountOldestActivationFirst(left: CodexAuthAccountSummary, right: CodexAuthAccountSummary) {
+  const leftActivatedAt = left.lastActivatedAt
+  const rightActivatedAt = right.lastActivatedAt
+  if (leftActivatedAt === null && rightActivatedAt !== null) return -1
+  if (leftActivatedAt !== null && rightActivatedAt === null) return 1
+  if (leftActivatedAt !== null && rightActivatedAt !== null && leftActivatedAt !== rightActivatedAt) {
+    return leftActivatedAt - rightActivatedAt
+  }
+
+  const leftLabel = left.email ?? left.id
+  const rightLabel = right.email ?? right.id
+  return leftLabel.localeCompare(rightLabel)
+}
+
+export async function switchToNextCodexAuthAccount(homeDir?: string): Promise<{
+  snapshot: CodexAuthSnapshot
+  switchedAccount: CodexAuthAccountSummary
+} | null> {
+  const snapshot = await readCodexAuthSnapshot(homeDir)
+  const nextAccount = [...snapshot.accounts]
+    .filter((account) => account.isAvailable && !account.isActive)
+    .sort(compareAccountOldestActivationFirst)[0]
+
+  if (!nextAccount) {
+    return null
+  }
+
+  const switchedSnapshot = await switchCodexAuthAccount(nextAccount.id, homeDir)
+  const switchedAccount = switchedSnapshot.accounts.find((account) => account.isActive && account.id === nextAccount.id)
+  if (!switchedAccount) {
+    return null
+  }
+
+  return {
+    snapshot: switchedSnapshot,
+    switchedAccount,
+  }
 }

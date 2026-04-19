@@ -24,6 +24,7 @@ import {
 } from "./provider-catalog"
 import { resolveClaudeApiModelId } from "../shared/types"
 import { fallbackTitleFromMessage } from "./generate-title"
+import { switchToNextCodexAuthAccount } from "./codex-accounts"
 
 const CLAUDE_TOOLSET = [
   "Skill",
@@ -71,6 +72,7 @@ interface AgentCoordinatorArgs {
   onStateChange: () => void
   codexManager?: CodexAppServerManager
   generateTitle?: (messageContent: string, cwd: string) => Promise<GenerateChatTitleResult>
+  autoSwitchCodexAccount?: typeof switchToNextCodexAuthAccount
 }
 
 function timestamped<T extends Omit<TranscriptEntry, "_id" | "createdAt">>(
@@ -108,6 +110,114 @@ function escapeXmlAttribute(value: string) {
     .replaceAll("\"", "&quot;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
+}
+
+const CODEX_USAGE_LIMIT_PATTERN = /you(?:'|’)ve hit your usage limit/i
+
+function isCodexUsageLimitMessage(provider: AgentProvider, message: string) {
+  if (provider !== "codex") return false
+  return CODEX_USAGE_LIMIT_PATTERN.test(message) || (
+    message.toLowerCase().includes("usage limit")
+    && message.toLowerCase().includes("codex/settings/usage")
+  )
+}
+
+function createErrorResultEntry(message: string): Extract<TranscriptEntry, { kind: "result" }> {
+  return timestamped({
+    kind: "result",
+    subtype: "error",
+    isError: true,
+    durationMs: 0,
+    result: message,
+  }) as Extract<TranscriptEntry, { kind: "result" }>
+}
+
+function compactRetryText(value: string, maxLength = 1200) {
+  const normalized = value.replace(/\s+/g, " ").trim()
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`
+}
+
+function formatRetryContextEntry(entry: TranscriptEntry): string | null {
+  switch (entry.kind) {
+    case "user_prompt":
+      return entry.content.trim() ? `User: ${compactRetryText(entry.content, 1600)}` : null
+    case "assistant_text":
+      return entry.text.trim() ? `Assistant: ${compactRetryText(entry.text, 1600)}` : null
+    case "compact_summary":
+      return entry.summary.trim() ? `Summary: ${compactRetryText(entry.summary, 1800)}` : null
+    case "tool_call":
+      return `Tool ${entry.tool.toolName}: ${compactRetryText(stringFromUnknown(entry.tool.input), 800)}`
+    case "tool_result":
+      return `Tool result${entry.isError ? " (error)" : ""}: ${compactRetryText(stringFromUnknown(entry.content), 1000)}`
+    case "result":
+      if (entry.isError || !entry.result.trim()) return null
+      return `Result: ${compactRetryText(entry.result, 800)}`
+    default:
+      return null
+  }
+}
+
+function buildRetryContinuationPrompt(entries: TranscriptEntry[]) {
+  const summaries = entries
+    .filter((entry): entry is Extract<TranscriptEntry, { kind: "compact_summary" }> => entry.kind === "compact_summary")
+    .map((entry) => compactRetryText(entry.summary, 3_200))
+    .filter(Boolean)
+
+  const firstUserPrompt = entries.find((entry): entry is Extract<TranscriptEntry, { kind: "user_prompt" }> => (
+    entry.kind === "user_prompt" && entry.content.trim().length > 0
+  ))
+  const latestUserPrompt = [...entries].reverse().find((entry): entry is Extract<TranscriptEntry, { kind: "user_prompt" }> => (
+    entry.kind === "user_prompt" && entry.content.trim().length > 0
+  ))
+
+  const recentFormatted = entries
+    .map((entry) => formatRetryContextEntry(entry))
+    .filter((entry): entry is string => Boolean(entry))
+
+  if (!firstUserPrompt && recentFormatted.length === 0 && summaries.length === 0) {
+    return "继续"
+  }
+
+  const selectedRecent: string[] = []
+  let totalLength = 0
+  for (let index = recentFormatted.length - 1; index >= 0; index -= 1) {
+    const line = recentFormatted[index]!
+    const nextLength = totalLength + line.length + 1
+    if (selectedRecent.length >= 40 || nextLength > 24_000) {
+      break
+    }
+    selectedRecent.unshift(line)
+    totalLength = nextLength
+  }
+
+  const sections = [
+    "继续。",
+    "",
+    "由于账号已自动切换，原来的 Codex thread 无法继续复用。下面附上这段对话的任务背景、压缩摘要和最近上下文。请把它们视为同一任务的既有状态，直接从中断处继续，不要从头开始，也不要重复已经完成的步骤。",
+  ]
+
+  if (firstUserPrompt) {
+    sections.push("", "<original_task>", compactRetryText(firstUserPrompt.content, 4_000), "</original_task>")
+  }
+
+  if (summaries.length > 0) {
+    sections.push("", "<conversation_summaries>", ...summaries.map((summary) => `Summary: ${summary}`), "</conversation_summaries>")
+  }
+
+  if (latestUserPrompt && latestUserPrompt !== firstUserPrompt) {
+    sections.push("", "<latest_user_request>", compactRetryText(latestUserPrompt.content, 4_000), "</latest_user_request>")
+  }
+
+  if (selectedRecent.length > 0) {
+    sections.push("", "<recent_conversation_context>", ...selectedRecent, "</recent_conversation_context>")
+  }
+
+  sections.push("", "请先简短确认你已恢复上述上下文，然后直接继续执行。")
+
+  return [
+    ...sections,
+  ].join("\n")
 }
 
 export function buildAttachmentHintText(attachments: ChatAttachment[]) {
@@ -533,6 +643,7 @@ export class AgentCoordinator {
   private readonly onStateChange: () => void
   private readonly codexManager: CodexAppServerManager
   private readonly generateTitle: (messageContent: string, cwd: string) => Promise<GenerateChatTitleResult>
+  private readonly autoSwitchCodexAccount: typeof switchToNextCodexAuthAccount
   private reportBackgroundError: ((message: string) => void) | null = null
   readonly activeTurns = new Map<string, ActiveTurn>()
   readonly drainingStreams = new Map<string, { turn: HarnessTurn }>()
@@ -542,6 +653,7 @@ export class AgentCoordinator {
     this.onStateChange = args.onStateChange
     this.codexManager = args.codexManager ?? new CodexAppServerManager()
     this.generateTitle = args.generateTitle ?? generateTitleForChatDetailed
+    this.autoSwitchCodexAccount = args.autoSwitchCodexAccount ?? switchToNextCodexAuthAccount
   }
 
   setBackgroundErrorReporter(report: ((message: string) => void) | null) {
@@ -582,6 +694,47 @@ export class AgentCoordinator {
     draining.turn.close()
     this.drainingStreams.delete(chatId)
     this.onStateChange()
+  }
+
+  private async maybeAnnotateUsageLimitResult(
+    active: ActiveTurn,
+    entry: Extract<TranscriptEntry, { kind: "result" }>
+  ): Promise<Extract<TranscriptEntry, { kind: "result" }>> {
+    if (!entry.isError || !isCodexUsageLimitMessage(active.provider, entry.result)) {
+      return entry
+    }
+
+    try {
+      const switched = await this.autoSwitchCodexAccount()
+      if (!switched) {
+        return entry
+      }
+
+      const retrySessionToken = this.store.requireChat(active.chatId).sessionToken
+      this.codexManager.stopSession(active.chatId)
+      const retryPrompt = retrySessionToken
+        ? "继续"
+        : buildRetryContinuationPrompt(this.store.getMessages(active.chatId))
+
+      const accountLabel = switched.switchedAccount.email ?? switched.switchedAccount.id
+      return {
+        ...entry,
+        retryAction: {
+          type: "send_message",
+          label: "Retry",
+          content: retryPrompt,
+          provider: "codex",
+        },
+        autoRecovery: {
+          type: "codex_usage_limit_switch",
+          switchedAccountId: switched.switchedAccount.id,
+          switchedAccountEmail: switched.switchedAccount.email,
+          notice: `Codex account switched to ${accountLabel}. Click Retry to send "继续".`,
+        },
+      }
+    } catch {
+      return entry
+    }
   }
 
   private resolveProvider(command: Extract<ClientCommand, { type: "chat.send" }>, currentProvider: AgentProvider | null) {
@@ -816,16 +969,19 @@ export class AgentCoordinator {
         }
 
         if (!event.entry) continue
-        await this.store.appendMessage(active.chatId, event.entry)
+        const entry = event.entry.kind === "result"
+          ? await this.maybeAnnotateUsageLimitResult(active, event.entry)
+          : event.entry
+        await this.store.appendMessage(active.chatId, entry)
 
-        if (event.entry.kind === "system_init") {
+        if (entry.kind === "system_init") {
           active.status = "running"
         }
 
-        if (event.entry.kind === "result") {
+        if (entry.kind === "result") {
           active.hasFinalResult = true
-          if (event.entry.isError) {
-            await this.store.recordTurnFailed(active.chatId, event.entry.result || "Turn failed")
+          if (entry.isError) {
+            await this.store.recordTurnFailed(active.chatId, entry.result || "Turn failed")
           } else if (!active.cancelRequested) {
             await this.store.recordTurnFinished(active.chatId)
           }
@@ -844,15 +1000,13 @@ export class AgentCoordinator {
     } catch (error) {
       if (!active.cancelRequested) {
         const message = error instanceof Error ? error.message : String(error)
+        const resultEntry = await this.maybeAnnotateUsageLimitResult(
+          active,
+          createErrorResultEntry(message)
+        )
         await this.store.appendMessage(
           active.chatId,
-          timestamped({
-            kind: "result",
-            subtype: "error",
-            isError: true,
-            durationMs: 0,
-            result: message,
-          })
+          resultEntry
         )
         await this.store.recordTurnFailed(active.chatId, message)
       }
@@ -886,15 +1040,13 @@ export class AgentCoordinator {
           })
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
+          const resultEntry = await this.maybeAnnotateUsageLimitResult(
+            active,
+            createErrorResultEntry(message)
+          )
           await this.store.appendMessage(
             active.chatId,
-            timestamped({
-              kind: "result",
-              subtype: "error",
-              isError: true,
-              durationMs: 0,
-              result: message,
-            })
+            resultEntry
           )
           await this.store.recordTurnFailed(active.chatId, message)
           this.onStateChange()

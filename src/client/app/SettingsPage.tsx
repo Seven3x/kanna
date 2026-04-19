@@ -19,7 +19,7 @@ import {
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useNavigate, useOutletContext, useParams } from "react-router-dom"
-import { getKeybindingsFilePathDisplay, SDK_CLIENT_APP } from "../../shared/branding"
+import { APP_NAME, getKeybindingsFilePathDisplay, SDK_CLIENT_APP } from "../../shared/branding"
 import { DEFAULT_KEYBINDINGS, PROVIDERS, type AgentProvider, type CodexAuthSnapshot, type CodexUsageSnapshot, type KeybindingAction, type UpdateSnapshot } from "../../shared/types"
 import { markdownComponents } from "../components/messages/shared"
 import { ChatPreferenceControls } from "../components/chat-ui/ChatPreferenceControls"
@@ -311,7 +311,7 @@ export function CodexUsageCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-medium text-foreground">Codex Usage</div>
-          <div className="mt-1 text-xs text-muted-foreground">Tracked from local Kanna Codex chats and imported history.</div>
+          <div className="mt-1 text-xs text-muted-foreground">Tracked from local {APP_NAME} Codex chats and imported history.</div>
         </div>
         <button
           type="button"
@@ -725,7 +725,7 @@ export function SettingsPage() {
     : updateSnapshot?.status === "updating"
       ? "Installing update…"
       : updateSnapshot?.status === "restart_pending"
-        ? "Restarting Kanna…"
+        ? `Restarting ${APP_NAME}…`
         : updateSnapshot?.status === "available"
           ? `Update available${updateSnapshot.latestVersion ? `: ${updateSnapshot.latestVersion}` : ""}`
           : updateSnapshot?.status === "up_to_date"
@@ -1296,7 +1296,7 @@ export function SettingsPage() {
 
                     <SettingsRow
                       title="Codex Usage"
-                      description="A local summary of Codex usage recorded by Kanna."
+                      description={`A local summary of Codex usage recorded by ${APP_NAME}.`}
                       alignStart
                     >
                       <CodexUsageCard

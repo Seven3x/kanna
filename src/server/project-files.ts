@@ -1,15 +1,16 @@
-import { lstat, open, readdir, realpath, stat, writeFile } from "node:fs/promises"
+import { lstat, mkdir, open, readdir, realpath, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import type {
   ProjectFileListResponse,
   ProjectFilePreviewKind,
   ProjectFilePreviewResponse,
   ProjectFileUploadResponse,
+  ProjectFileWriteResponse,
 } from "../shared/project-files"
 import { resolveLocalPath } from "./paths"
 import { EventStore } from "./event-store"
 
-const PROJECT_FILE_ROUTE = /^\/api\/projects\/(?<projectId>[^/]+)\/(?<resource>files|preview|raw)$/
+const PROJECT_FILE_ROUTE = /^\/api\/projects\/(?<projectId>[^/]+)\/(?<resource>files|preview|raw|content)$/
 const MAX_PREVIEW_BYTES = 128 * 1024
 
 class ProjectFileError extends Error {
@@ -288,6 +289,47 @@ export async function uploadProjectFiles(
   }
 }
 
+export async function writeProjectFileContent(
+  store: EventStore,
+  projectId: string,
+  rawPath: string | null,
+  content: string,
+): Promise<ProjectFileWriteResponse> {
+  const { projectRoot, projectRootRealPath } = await getProjectRoot(store, projectId)
+  const relativePath = normalizeRelativeProjectPath(rawPath)
+  if (!relativePath) {
+    throw new ProjectFileError(400, "Invalid file path")
+  }
+
+  const absolutePath = path.resolve(projectRoot, relativePath)
+  if (!isWithinRoot(projectRoot, absolutePath)) {
+    throw new ProjectFileError(403, "File is outside the project root")
+  }
+
+  const parentDirectory = path.dirname(absolutePath)
+  const parentRealPath = await realpath(parentDirectory).catch(() => null)
+  if (parentRealPath && !isWithinRoot(projectRootRealPath, parentRealPath)) {
+    throw new ProjectFileError(403, "File is outside the project root")
+  }
+
+  const existingInfo = await stat(absolutePath).catch(() => null)
+  if (existingInfo && !existingInfo.isFile()) {
+    throw new ProjectFileError(400, "Path must be a file")
+  }
+
+  await mkdir(parentDirectory, { recursive: true })
+  await writeFile(absolutePath, content, "utf8")
+
+  const info = await stat(absolutePath)
+  return {
+    projectId,
+    path: relativePath,
+    size: Number(info.size),
+    modifiedAt: Number(info.mtimeMs),
+    created: !existingInfo,
+  }
+}
+
 export async function handleProjectFilesRequest(req: Request, store: EventStore) {
   const url = new URL(req.url)
   const match = PROJECT_FILE_ROUTE.exec(url.pathname)
@@ -295,11 +337,11 @@ export async function handleProjectFilesRequest(req: Request, store: EventStore)
     return null
   }
 
-  if (req.method !== "GET" && req.method !== "POST") {
+  if (req.method !== "GET" && req.method !== "POST" && req.method !== "PUT") {
     return new Response("Method Not Allowed", {
       status: 405,
       headers: {
-        Allow: "GET, POST",
+        Allow: "GET, POST, PUT",
       },
     })
   }
@@ -312,7 +354,30 @@ export async function handleProjectFilesRequest(req: Request, store: EventStore)
       if (req.method === "POST") {
         return Response.json(await uploadProjectFiles(store, projectId, rawPath, await req.formData()))
       }
+      if (req.method !== "GET") {
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: {
+            Allow: "GET, POST",
+          },
+        })
+      }
       return Response.json(await listProjectDirectory(store, projectId, rawPath))
+    }
+    if (resource === "content") {
+      if (req.method !== "PUT") {
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: {
+            Allow: "PUT",
+          },
+        })
+      }
+      const payload = await req.json().catch(() => null) as { content?: unknown } | null
+      if (typeof payload?.content !== "string") {
+        throw new ProjectFileError(400, "Invalid file content")
+      }
+      return Response.json(await writeProjectFileContent(store, projectId, rawPath, payload.content))
     }
     if (req.method !== "GET") {
       return new Response("Method Not Allowed", {

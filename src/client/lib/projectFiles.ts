@@ -2,6 +2,7 @@ import type {
   ProjectFileListResponse,
   ProjectFilePreviewResponse,
   ProjectFileUploadResponse,
+  ProjectFileWriteResponse,
 } from "../../shared/project-files"
 
 function withPathQuery(basePath: string, filePath?: string) {
@@ -25,6 +26,10 @@ export function buildProjectFileRawUrl(projectId: string, filePath: string, down
   return download
     ? `${basePath}${basePath.includes("?") ? "&" : "?"}download=1`
     : basePath
+}
+
+export function buildProjectFileContentUrl(projectId: string, filePath: string) {
+  return withPathQuery(`/api/projects/${encodeURIComponent(projectId)}/content`, filePath)
 }
 
 async function readProjectFilesResponse<T>(response: Response, fallbackMessage: string) {
@@ -77,6 +82,18 @@ export async function uploadProjectFiles(projectId: string, files: File[], fileP
   })
 
   return readProjectFilesResponse<ProjectFileUploadResponse>(response, "Failed to upload files")
+}
+
+export async function writeProjectFile(projectId: string, filePath: string, content: string) {
+  const response = await fetch(buildProjectFileContentUrl(projectId, filePath), {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ content }),
+  })
+
+  return readProjectFilesResponse<ProjectFileWriteResponse>(response, "Failed to save file")
 }
 
 export function getProjectRelativeFilePath(projectRoot: string | undefined | null, filePath: string | undefined | null) {

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { ArrowDown, Flower, Upload } from "lucide-react"
 import { useOutletContext } from "react-router-dom"
 import { ChatInput, type ChatInputHandle } from "../components/chat-ui/ChatInput"
+import { ContextWindowMeter, SessionTokenBadge } from "../components/chat-ui/ContextWindowMeter"
 import { ChatNavbar } from "../components/chat-ui/ChatNavbar"
 import { RightSidebar } from "../components/chat-ui/RightSidebar"
 import { SubagentDock } from "../components/chat-ui/SubagentDock"
@@ -13,7 +14,11 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../compone
 import { ScrollArea } from "../components/ui/scroll-area"
 import { actionMatchesEvent, getResolvedKeybindings } from "../lib/keybindings"
 import { resolveProjectLocalFilePath } from "../lib/projectFiles"
-import { deriveLatestContextWindowSnapshot, type ContextWindowSnapshot } from "../lib/contextWindow"
+import {
+  deriveContextWindowUsageHistory,
+  deriveLatestContextWindowSnapshot,
+  type ContextWindowSnapshot,
+} from "../lib/contextWindow"
 import { cn } from "../lib/utils"
 import {
   DEFAULT_PROJECT_RIGHT_SIDEBAR_LAYOUT,
@@ -94,6 +99,10 @@ export function ChatPage() {
     baseContextWindowSnapshotRef.current = derivedSnapshot
     return derivedSnapshot
   }, [state.chatSnapshot?.messages])
+  const contextWindowHistory = useMemo(
+    () => deriveContextWindowUsageHistory(state.chatSnapshot?.messages ?? []),
+    [state.chatSnapshot?.messages]
+  )
 
   const hasTerminals = terminalLayout.terminals.length > 0
   const showTerminalPane = Boolean(projectId && terminalLayout.isVisible && hasTerminals)
@@ -384,6 +393,21 @@ export function ChatPage() {
           terminalShortcut={resolvedKeybindings.bindings.toggleEmbeddedTerminal}
           rightSidebarShortcut={resolvedKeybindings.bindings.toggleRightSidebar}
         />
+        {(state.runtime?.sessionToken || contextWindowSnapshot) ? (
+          <div className="pointer-events-none absolute right-4 top-[58px] z-10 hidden md:block">
+            <div className="pointer-events-auto">
+              {contextWindowSnapshot ? (
+                <ContextWindowMeter
+                  usage={contextWindowSnapshot}
+                  sessionToken={state.runtime?.sessionToken ?? null}
+                  history={contextWindowHistory}
+                />
+              ) : (
+                <SessionTokenBadge sessionToken={state.runtime?.sessionToken ?? null} />
+              )}
+            </div>
+          </div>
+        ) : null}
 
         <ScrollArea
           ref={state.scrollRef}
@@ -393,7 +417,7 @@ export function ChatPage() {
           {state.messages.length === 0 ? <div style={{ height: state.transcriptPaddingBottom }} aria-hidden="true" /> : null}
           {state.messages.length > 0 ? (
             <>
-              <div className="animate-fade-in space-y-5 pt-[72px] max-w-[800px] mx-auto">
+              <div className="animate-fade-in space-y-5 max-w-[800px] mx-auto pt-[72px]">
                 <KannaTranscript
                   messages={state.messages}
                   isLoading={state.isProcessing}
@@ -414,6 +438,12 @@ export function ChatPage() {
                         )
                       }
                     : undefined}
+                  onRetryResult={(message) => {
+                    if (message.retryAction?.type !== "send_message") return
+                    return state.handleSend(message.retryAction.content, {
+                      provider: message.retryAction.provider,
+                    })
+                  }}
                   onAskUserQuestionSubmit={state.handleAskUserQuestion}
                   onExitPlanModeConfirm={state.handleExitPlanMode}
                 />
@@ -525,6 +555,8 @@ export function ChatPage() {
             availableProviders={state.availableProviders}
             skills={state.currentProjectSkills}
             contextWindowSnapshot={contextWindowSnapshot}
+            contextWindowHistory={contextWindowHistory}
+            sessionToken={state.runtime?.sessionToken ?? null}
           />
         </div>
       </div>

@@ -18,6 +18,14 @@ export interface ProjectFileUploadResponse {
   uploaded: string[]
 }
 
+export interface ProjectFileWriteResponse {
+  projectId: string
+  path: string
+  size: number
+  modifiedAt: number
+  created: boolean
+}
+
 export type ProjectFilePreviewKind = "text" | "image" | "binary"
 
 export interface ProjectFilePreviewResponse {
