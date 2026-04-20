@@ -94,6 +94,44 @@ function decodeHistoryCursor(cursor: string) {
   throw new Error("Invalid history cursor")
 }
 
+function tryParseTranscriptEntry(raw: string) {
+  const candidate = raw.trim()
+  if (!candidate) return null
+
+  try {
+    return JSON.parse(candidate) as TranscriptEntry
+  } catch {
+    return null
+  }
+}
+
+function recoverTranscriptEntriesFromCorruptLine(line: string) {
+  const objectStartPattern = /(?<!\\)\{"_id":/g
+  const startIndexes: number[] = []
+
+  for (const match of line.matchAll(objectStartPattern)) {
+    if (typeof match.index === "number") {
+      startIndexes.push(match.index)
+    }
+  }
+
+  if (startIndexes.length <= 1) {
+    return []
+  }
+
+  const recovered: TranscriptEntry[] = []
+  for (let index = 0; index < startIndexes.length; index += 1) {
+    const start = startIndexes[index]
+    const end = startIndexes[index + 1] ?? line.length
+    const parsed = tryParseTranscriptEntry(line.slice(start, end))
+    if (parsed) {
+      recovered.push(parsed)
+    }
+  }
+
+  return recovered
+}
+
 export class EventStore {
   readonly dataDir: string
   readonly state: StoreState = createEmptyState()
@@ -462,10 +500,35 @@ export class EventStore {
     if (!text.trim()) return []
 
     const entries: TranscriptEntry[] = []
-    for (const rawLine of text.split("\n")) {
-      const line = rawLine.trim()
+    const lines = text.split("\n")
+    let lastNonEmpty = -1
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if (lines[index].trim()) {
+        lastNonEmpty = index
+        break
+      }
+    }
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index].trim()
       if (!line) continue
-      entries.push(JSON.parse(line) as TranscriptEntry)
+      try {
+        entries.push(JSON.parse(line) as TranscriptEntry)
+      } catch (error) {
+        const recoveredEntries = recoverTranscriptEntriesFromCorruptLine(line)
+        if (recoveredEntries.length > 0) {
+          console.warn(
+            `${LOG_PREFIX} Recovered ${recoveredEntries.length} transcript entr${recoveredEntries.length === 1 ? "y" : "ies"} from corrupt line ${index + 1} for chat ${chatId}`
+          )
+          entries.push(...recoveredEntries)
+          continue
+        }
+        if (index === lastNonEmpty) {
+          console.warn(`${LOG_PREFIX} Ignoring corrupt trailing transcript line for chat ${chatId}:`, error)
+          break
+        }
+        throw error
+      }
     }
     return entries
   }

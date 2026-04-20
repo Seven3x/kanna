@@ -126,6 +126,8 @@ interface ExpandableRowProps {
   expandedContent: ReactNode
   defaultExpanded?: boolean
   trailingContent?: ReactNode
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
 }
 
 export function ExpandableRow({
@@ -133,14 +135,24 @@ export function ExpandableRow({
   expandedContent,
   defaultExpanded = false,
   trailingContent,
+  expanded: controlledExpanded,
+  onExpandedChange,
 }: ExpandableRowProps) {
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [uncontrolledExpanded, setUncontrolledExpanded] = useState(defaultExpanded)
+  const expanded = controlledExpanded ?? uncontrolledExpanded
+
+  function updateExpanded(nextExpanded: boolean) {
+    if (controlledExpanded === undefined) {
+      setUncontrolledExpanded(nextExpanded)
+    }
+    onExpandedChange?.(nextExpanded)
+  }
 
   return (
     <div className="flex flex-col w-full">
       <div className="flex items-start gap-2">
         <button
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => updateExpanded(!expanded)}
           className={`group/expandable-row min-w-0 flex-1 cursor-pointer grid grid-cols-[auto_1fr] items-center gap-1 text-sm ${!expanded ? "hover:opacity-60 transition-opacity" : ""}`}
         >
           <div className="grid min-w-0 grid-cols-[auto_1fr] items-center gap-1.5">

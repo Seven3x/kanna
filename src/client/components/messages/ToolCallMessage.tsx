@@ -123,6 +123,7 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
   }
 
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const hasResult = message.result !== undefined
   const showLoadingState = !hasResult && isLoading
 
@@ -197,16 +198,6 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
   }, [localPath, message])
   const canPreviewProjectFile = Boolean(projectId && projectFilePath)
 
-  const resultText = useMemo(() => {
-    if (typeof message.result === "string") return message.result
-    if (!message.result) return ""
-    if (typeof message.result === "object" && message.result !== null && "content" in message.result) {
-      const content = (message.result as { content?: unknown }).content
-      if (typeof content === "string") return content
-    }
-    return JSON.stringify(message.result, null, 2)
-  }, [message.result])
-
   const readImages = useMemo(() => {
     if (!isReadTool) {
       return [] as ReadImageBlock[]
@@ -225,20 +216,11 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
     return extractReadImageBlocks(message.rawResult)
   }, [isReadTool, message.rawResult, message.result])
 
-  const inputText = useMemo(() => {
-    switch (message.toolKind) {
-      case "bash":
-        return message.input.command
-      case "write_file":
-        return message.input.content
-      default:
-        return JSON.stringify(message.input, null, 2)
-    }
-  }, [message])
-
   return (
     <MetaRow className="w-full">
       <ExpandableRow
+        expanded={expanded}
+        onExpandedChange={setExpanded}
         trailingContent={canPreviewProjectFile ? (
           <>
             <Button
@@ -261,80 +243,16 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
           </>
         ) : null}
         expandedContent={
-          <VerticalLineContainer className="my-4 text-sm">
-            <div className="flex flex-col gap-2">
-              {isEditTool ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground/80">File</span>
-                    <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
-                  </div>
-                  <FileContentView
-                    content=""
-                    isDiff
-                    oldString={message.input.oldString}
-                    newString={message.input.newString}
-                  />
-                </>
-              ) : !isReadTool && !isWriteTool && (
-                <MetaCodeBlock label={
-                  isBashTool ? (
-                    <span className="flex items-center gap-2 w-full">
-                      <span>Command</span>
-                      {!!message.input.timeoutMs && (
-                        <span className="text-muted-foreground">timeout: {String(message.input.timeoutMs)}ms</span>
-                      )}
-                      {!!message.input.runInBackground && (
-                        <span className="text-muted-foreground">background</span>
-                      )}
-                    </span>
-                  ) : isWriteTool ? "Contents" : "Input"
-                } copyText={inputText}>
-                  {inputText}
-                </MetaCodeBlock>
-              )}
-              {hasResult && isReadTool && !message.isError && (
-                readImages.length > 0 ? (
-                  <div>
-                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground/80">File</span>
-                      <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
-                    </div>
-                    <span className="font-medium text-muted-foreground">Image</span>
-                    <div className="mt-1">
-                      <ReadResultImages images={readImages} />
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground/80">File</span>
-                      <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
-                    </div>
-                    <FileContentView
-                      content={resultText}
-                    />
-                  </>
-                )
-              )}
-              {isWriteTool && !message.isError && (
-                <>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground/80">File</span>
-                    <MetaText>{stripWorkspacePath(message.input.filePath, localPath)}</MetaText>
-                  </div>
-                  <FileContentView
-                    content={message.input.content}
-                  />
-                </>
-              )}
-              {hasResult && !isReadTool && !(isWriteTool && !message.isError) && !(isEditTool && !message.isError) && (
-                <MetaCodeBlock label={message.isError ? "Error" : "Result"} copyText={resultText}>
-                  {resultText}
-                </MetaCodeBlock>
-              )}
-            </div>
-          </VerticalLineContainer>
+          <ToolCallExpandedContent
+            message={message}
+            localPath={localPath}
+            isBashTool={isBashTool}
+            isReadTool={isReadTool}
+            isWriteTool={isWriteTool}
+            isEditTool={isEditTool}
+            hasResult={hasResult}
+            readImages={readImages}
+          />
         }
       >
 
@@ -377,5 +295,130 @@ export function ToolCallMessage({ message, isLoading = false, localPath, project
         />
       ) : null}
     </MetaRow>
+  )
+}
+
+function ToolCallExpandedContent({
+  message,
+  localPath,
+  isBashTool,
+  isReadTool,
+  isWriteTool,
+  isEditTool,
+  hasResult,
+  readImages,
+}: {
+  message: ProcessedToolCall
+  localPath?: string | null
+  isBashTool: boolean
+  isReadTool: boolean
+  isWriteTool: boolean
+  isEditTool: boolean
+  hasResult: boolean
+  readImages: ReadonlyArray<ReadImageBlock>
+}) {
+  const resultText = useMemo(() => {
+    if (typeof message.result === "string") return message.result
+    if (!message.result) return ""
+    if (typeof message.result === "object" && message.result !== null && "content" in message.result) {
+      const content = (message.result as { content?: unknown }).content
+      if (typeof content === "string") return content
+    }
+    return JSON.stringify(message.result, null, 2)
+  }, [message.result])
+
+  const inputText = useMemo(() => {
+    switch (message.toolKind) {
+      case "bash":
+        return message.input.command
+      case "write_file":
+        return message.input.content
+      default:
+        return JSON.stringify(message.input, null, 2)
+    }
+  }, [message])
+
+  const filePath = "filePath" in message.input ? message.input.filePath : null
+  const oldString = "oldString" in message.input ? message.input.oldString : ""
+  const newString = "newString" in message.input ? message.input.newString : ""
+  const timeoutMs = "timeoutMs" in message.input ? message.input.timeoutMs : undefined
+  const runInBackground = "runInBackground" in message.input ? message.input.runInBackground : undefined
+  const writeContent = "content" in message.input ? message.input.content : ""
+
+  return (
+    <VerticalLineContainer className="my-4 text-sm">
+      <div className="flex flex-col gap-2">
+        {isEditTool ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground/80">File</span>
+              <MetaText>{stripWorkspacePath(filePath ?? "", localPath)}</MetaText>
+            </div>
+            <FileContentView
+              content=""
+              isDiff
+              oldString={oldString}
+              newString={newString}
+            />
+          </>
+        ) : !isReadTool && !isWriteTool && (
+          <MetaCodeBlock label={
+            isBashTool ? (
+              <span className="flex items-center gap-2 w-full">
+                <span>Command</span>
+                {!!timeoutMs && (
+                  <span className="text-muted-foreground">timeout: {String(timeoutMs)}ms</span>
+                )}
+                {!!runInBackground && (
+                  <span className="text-muted-foreground">background</span>
+                )}
+              </span>
+            ) : isWriteTool ? "Contents" : "Input"
+          } copyText={inputText}>
+            {inputText}
+          </MetaCodeBlock>
+        )}
+        {hasResult && isReadTool && !message.isError && (
+          readImages.length > 0 ? (
+            <div>
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground/80">File</span>
+                <MetaText>{stripWorkspacePath(filePath ?? "", localPath)}</MetaText>
+              </div>
+              <span className="font-medium text-muted-foreground">Image</span>
+              <div className="mt-1">
+                <ReadResultImages images={readImages} />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground/80">File</span>
+                <MetaText>{stripWorkspacePath(filePath ?? "", localPath)}</MetaText>
+              </div>
+              <FileContentView
+                content={resultText}
+              />
+            </>
+          )
+        )}
+        {isWriteTool && !message.isError && (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground/80">File</span>
+              <MetaText>{stripWorkspacePath(filePath ?? "", localPath)}</MetaText>
+            </div>
+            <FileContentView
+              content={writeContent}
+            />
+          </>
+        )}
+        {hasResult && !isReadTool && !(isWriteTool && !message.isError) && !(isEditTool && !message.isError) && (
+          <MetaCodeBlock label={message.isError ? "Error" : "Result"} copyText={resultText}>
+            {resultText}
+          </MetaCodeBlock>
+        )}
+      </div>
+    </VerticalLineContainer>
   )
 }

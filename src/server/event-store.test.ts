@@ -236,6 +236,55 @@ describe("EventStore", () => {
     })
   })
 
+  test("ignores a corrupt trailing transcript line", async () => {
+    const dataDir = await createTempDataDir()
+    const store = new EventStore(dataDir)
+    await store.initialize()
+
+    const project = await store.openProject("/tmp/project")
+    const chat = await store.createChat(project.id)
+    await store.appendMessage(chat.id, entry("user_prompt", 100, { content: "one" }))
+    await store.appendMessage(chat.id, entry("assistant_text", 101, { content: "two" }))
+
+    const transcriptPath = join(dataDir, "transcripts", `${chat.id}.jsonl`)
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify(entry("user_prompt", 100, { content: "one" }))}\n${JSON.stringify(entry("assistant_text", 101, { content: "two" }))}\n{"_id":"broken"`,
+      "utf8"
+    )
+
+    expect(store.getMessages(chat.id)).toEqual([
+      entry("user_prompt", 100, { content: "one" }),
+      entry("assistant_text", 101, { content: "two" }),
+    ])
+  })
+
+  test("recovers valid entries appended onto a corrupt transcript line", async () => {
+    const dataDir = await createTempDataDir()
+    const store = new EventStore(dataDir)
+    await store.initialize()
+
+    const project = await store.openProject("/tmp/project")
+    const chat = await store.createChat(project.id)
+
+    const first = entry("user_prompt", 100, { content: "one" })
+    const second = entry("assistant_text", 101, { content: "two" })
+    const recovered = entry("user_prompt", 102, { content: "three" })
+
+    const transcriptPath = join(dataDir, "transcripts", `${chat.id}.jsonl`)
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify(first)}\n{"_id":"broken","kind":"tool_call","rawInput":{"id":"ca${JSON.stringify(recovered)}\n${JSON.stringify(second)}\n`,
+      "utf8"
+    )
+
+    expect(store.getMessages(chat.id)).toEqual([
+      first,
+      recovered,
+      second,
+    ])
+  })
+
   test("prunes stale empty chats after five minutes", async () => {
     const dataDir = await createTempDataDir()
     const store = new EventStore(dataDir)
