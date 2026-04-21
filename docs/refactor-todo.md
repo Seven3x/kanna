@@ -26,7 +26,7 @@ Use `[x]` when an item is complete. Add any follow-up notes directly under the i
   Expected impact: less event plumbing and lower blast radius for preference corruption.
   Status: completed on 2026-04-21.
 
-- [ ] Model ID normalization consolidation
+- [x] Model ID normalization consolidation
   Commit: `db77356`
   Scope: `src/shared/types.ts`, `src/client/stores/chatPreferencesStore.ts`, related server call sites
   Goals:
@@ -34,6 +34,7 @@ Use `[x]` when an item is complete. Add any follow-up notes directly under the i
   - Move Codex model normalization into shared code alongside Claude normalization.
   - Replace `isClaudeOpusModelId` string-prefix logic with declarative model metadata if practical.
   Expected impact: one source of truth for model normalization and capability checks.
+  Status: completed on 2026-04-21.
 
 - [ ] WS router command handler extraction
   Scope: `src/server/ws-router.ts`
