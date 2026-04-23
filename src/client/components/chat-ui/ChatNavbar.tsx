@@ -1,4 +1,4 @@
-import { Flower, Code, FolderOpen, Menu, PanelLeft, SquarePen, Terminal, GitBranch, PanelRight } from "lucide-react"
+import { Flower, Code, FolderOpen, Loader2, Menu, PanelLeft, SquarePen, Terminal, GitBranch, PanelRight, Share2 } from "lucide-react"
 import { Button } from "../ui/button"
 import { CardHeader } from "../ui/card"
 import { HotkeyTooltip, HotkeyTooltipContent, HotkeyTooltipTrigger } from "../ui/tooltip"
@@ -15,6 +15,9 @@ interface Props {
   rightSidebarVisible?: boolean
   onToggleRightSidebar?: () => void
   onOpenExternal?: (action: "open_finder" | "open_editor") => void
+  onExportTranscript?: () => void
+  canExportTranscript?: boolean
+  isExportingTranscript?: boolean
   editorLabel?: string
   finderShortcut?: string[]
   editorShortcut?: string[]
@@ -36,6 +39,9 @@ export function ChatNavbar({
   rightSidebarVisible = false,
   onToggleRightSidebar,
   onOpenExternal,
+  onExportTranscript,
+  canExportTranscript = false,
+  isExportingTranscript = false,
   editorLabel = "Editor",
   finderShortcut,
   editorShortcut,
@@ -97,7 +103,7 @@ export function ChatNavbar({
 
         <div className="flex-1 min-w-0" />
 
-        {localPath && (onOpenExternal || onToggleEmbeddedTerminal || onToggleRightSidebar) ? (
+        {localPath && (onOpenExternal || onToggleEmbeddedTerminal || onToggleRightSidebar || onExportTranscript) ? (
           <div className="flex items-center  flex-shrink-0 border border-border rounded-full px-2 py-1 backdrop-blur-lg">
             {(onOpenExternal || onToggleEmbeddedTerminal) ? (
               <>
@@ -152,6 +158,18 @@ export function ChatNavbar({
                 </HotkeyTooltip>
               ) : null}
               </>
+            ) : null}
+            {onExportTranscript ? (
+              <Button
+                variant="ghost"
+                size="none"
+                onClick={onExportTranscript}
+                disabled={!canExportTranscript || isExportingTranscript}
+                title="Export standalone transcript"
+                className="border border-border/0 hover:!border-border/0 px-1.5 h-9 hover:!bg-transparent disabled:opacity-50"
+              >
+                {isExportingTranscript ? <Loader2 className="h-4.5 animate-spin" /> : <Share2 strokeWidth={2} className="h-4.5" />}
+              </Button>
             ) : null}
             {onToggleRightSidebar ? (
               <HotkeyTooltip>

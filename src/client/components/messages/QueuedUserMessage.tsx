@@ -3,7 +3,7 @@ import remarkGfm from "remark-gfm"
 import type { QueuedChatMessage } from "../../../shared/types"
 import { Button } from "../ui/button"
 import { createMarkdownComponents } from "./shared"
-import { ArrowUp, ArrowUpNarrowWide, X } from "lucide-react"
+import { ArrowUp, X } from "lucide-react"
 
 interface QueuedUserMessageProps {
   message: QueuedChatMessage
