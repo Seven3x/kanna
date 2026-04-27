@@ -27,6 +27,7 @@ describe("ChatRow", () => {
         onShareChat={() => undefined}
         onOpenInFinder={() => undefined}
         onForkChat={() => undefined}
+        onArchiveChat={() => undefined}
         onDeleteChat={() => undefined}
       />
     )
@@ -45,6 +46,7 @@ describe("ChatRow", () => {
         onShareChat={() => undefined}
         onOpenInFinder={() => undefined}
         onForkChat={() => undefined}
+        onArchiveChat={() => undefined}
         onDeleteChat={() => undefined}
       />
     )
@@ -63,6 +65,7 @@ describe("ChatRow", () => {
         onShareChat={() => undefined}
         onOpenInFinder={() => undefined}
         onForkChat={() => undefined}
+        onArchiveChat={() => undefined}
         onDeleteChat={() => undefined}
       />
     )
@@ -84,6 +87,7 @@ describe("ChatRow", () => {
         onShareChat={() => undefined}
         onOpenInFinder={() => undefined}
         onForkChat={() => undefined}
+        onArchiveChat={() => undefined}
         onDeleteChat={() => undefined}
       />
     )
@@ -104,11 +108,12 @@ describe("ChatRow", () => {
         onShareChat={() => undefined}
         onOpenInFinder={() => undefined}
         onForkChat={() => undefined}
+        onArchiveChat={() => undefined}
         onDeleteChat={() => undefined}
       />
     )
 
     expect(html).toContain("Fork chat")
-    expect(html).toContain("Delete chat")
+    expect(html).toContain("Archive chat")
   })
 })

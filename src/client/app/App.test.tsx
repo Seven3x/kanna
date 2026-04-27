@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { getAppAuthStateFromStatus, shouldPlayChatNotificationSound, shouldRedirectToChangelog, shouldRetryAuthStatusRequest } from "./App"
 import { getChatNotificationSnapshot, getChatSoundBurstCount, getNotificationTitleCount } from "./chatNotifications"
+import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, clampSidebarWidth } from "./KannaSidebar"
 import { isBrowserUnfocused, shouldPlayChatSound } from "../lib/chatSounds"
 import type { AppSettingsSnapshot, SidebarChatRow } from "../../shared/types"
 
@@ -22,6 +23,15 @@ describe("shouldRedirectToChangelog", () => {
     expect(shouldRedirectToChangelog("/settings/general", "0.12.0", "0.11.0")).toBe(false)
     expect(shouldRedirectToChangelog("/chat/1", "0.12.0", "0.11.0")).toBe(false)
     expect(shouldRedirectToChangelog("/", "0.12.0", "0.12.0")).toBe(false)
+  })
+})
+
+describe("clampSidebarWidth", () => {
+  test("keeps sidebar resizing within bounds", () => {
+    expect(clampSidebarWidth(MIN_SIDEBAR_WIDTH - 1)).toBe(MIN_SIDEBAR_WIDTH)
+    expect(clampSidebarWidth(MAX_SIDEBAR_WIDTH + 1)).toBe(MAX_SIDEBAR_WIDTH)
+    expect(clampSidebarWidth(333.6)).toBe(334)
+    expect(clampSidebarWidth(Number.NaN)).toBe(DEFAULT_SIDEBAR_WIDTH)
   })
 })
 

@@ -35,6 +35,48 @@ describe("read models", () => {
     expect(sidebar.projectGroups[0]?.defaultCollapsed).toBe(false)
   })
 
+  test("keeps archived chats out of the main sidebar rows", () => {
+    const state = createEmptyState()
+    state.projectsById.set("project-1", {
+      id: "project-1",
+      localPath: "/tmp/project",
+      title: "Project",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    state.projectIdsByPath.set("/tmp/project", "project-1")
+    state.chatsById.set("chat-active", {
+      id: "chat-active",
+      projectId: "project-1",
+      title: "Active",
+      createdAt: 1,
+      updatedAt: 1,
+      unread: false,
+      provider: null,
+      planMode: false,
+      sessionToken: null,
+      lastTurnOutcome: null,
+    })
+    state.chatsById.set("chat-archived", {
+      id: "chat-archived",
+      projectId: "project-1",
+      title: "Archived",
+      createdAt: 2,
+      updatedAt: 3,
+      archivedAt: 3,
+      unread: false,
+      provider: null,
+      planMode: false,
+      sessionToken: null,
+      lastTurnOutcome: null,
+    })
+
+    const sidebar = deriveSidebarData(state, new Map(), { nowMs: 1_000_000 })
+
+    expect(sidebar.projectGroups[0]?.chats.map((chat) => chat.chatId)).toEqual(["chat-active"])
+    expect(sidebar.projectGroups[0]?.archivedChats?.map((chat) => chat.chatId)).toEqual(["chat-archived"])
+  })
+
   test("includes available providers in chat snapshots", () => {
     const state = createEmptyState()
     state.projectsById.set("project-1", {

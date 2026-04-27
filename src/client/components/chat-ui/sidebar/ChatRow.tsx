@@ -22,6 +22,7 @@ interface Props {
   onShareChat: (chatId: string) => void
   onOpenInFinder: (localPath: string) => void
   onForkChat: (chatId: string) => void
+  onArchiveChat: (chatId: string) => void
   onDeleteChat: (chatId: string) => void
 }
 
@@ -36,6 +37,7 @@ function ChatRowImpl({
   onShareChat,
   onOpenInFinder,
   onForkChat,
+  onArchiveChat,
   onDeleteChat,
 }: Props) {
   const ageLabel = formatSidebarAgeLabel(getSidebarChatTimestamp(chat), nowMs)
@@ -91,14 +93,14 @@ function ChatRowImpl({
               </Kbd>
             </span>
           ) : (
-            <span className="hidden md:flex absolute inset-0 items-center justify-end pr-1 text-[11px] text-muted-foreground opacity-50 transition-opacity group-hover:opacity-0">
+            <span className="hidden md:flex absolute inset-0 items-center justify-end pr-1 text-[11px] text-muted-foreground opacity-60 transition-opacity group-hover:opacity-0">
               {trailingLabel}
             </span>
           )
         ) : null}
         <div
           className={cn(
-            "absolute inset-0 flex items-center justify-end gap-0 opacity-100",
+            "absolute inset-0 flex items-center justify-end gap-0 opacity-100 mr-[3px]",
             trailingLabel
               ? "md:opacity-0 md:group-hover:opacity-100"
               : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
@@ -124,9 +126,9 @@ function ChatRowImpl({
             className="h-6 w-6 cursor-pointer rounded-sm hover:!bg-transparent !border-0"
             onClick={(event) => {
               event.stopPropagation()
-              onDeleteChat(chat.chatId)
+              onArchiveChat(chat.chatId)
             }}
-            title="Delete chat"
+            title="Archive chat"
           >
             <Archive className="size-3.5" />
           </Button>
@@ -142,6 +144,7 @@ function ChatRowImpl({
       onShare={() => onShareChat(chat.chatId)}
       onOpenInFinder={() => onOpenInFinder(chat.localPath)}
       onFork={() => onForkChat(chat.chatId)}
+      onArchive={() => onArchiveChat(chat.chatId)}
       onDelete={() => onDeleteChat(chat.chatId)}
     >
       {row}

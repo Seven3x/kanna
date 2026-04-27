@@ -70,14 +70,16 @@ export function deriveSidebarData(
   const nowMs = options?.nowMs ?? Date.now()
   const drainingChatIds = options?.drainingChatIds ?? new Set<string>()
   const chatsByProjectId = new Map<string, ChatRecord[]>()
+  const archivedChatsByProjectId = new Map<string, ChatRecord[]>()
   for (const chat of state.chatsById.values()) {
     if (chat.deletedAt) continue
-    const projectChats = chatsByProjectId.get(chat.projectId)
+    const targetMap = chat.archivedAt ? archivedChatsByProjectId : chatsByProjectId
+    const projectChats = targetMap.get(chat.projectId)
     if (projectChats) {
       projectChats.push(chat)
       continue
     }
-    chatsByProjectId.set(chat.projectId, [chat])
+    targetMap.set(chat.projectId, [chat])
   }
 
   const allProjects = [...state.projectsById.values()]
@@ -94,8 +96,8 @@ export function deriveSidebarData(
     ...unorderedProjects.filter((project) => !orderedProjectIds.has(project.id)),
   ]
 
-  const projectGroups: SidebarProjectGroup[] = projects.map((project) => {
-    const chats = (chatsByProjectId.get(project.id) ?? [])
+  function toSidebarChatRows(project: NonNullable<typeof projects[number]>, projectChats: ChatRecord[]) {
+    return projectChats
       .sort((a, b) => getSidebarChatSortTimestamp(b) - getSidebarChatSortTimestamp(a))
       .map((chat) => ({
         _id: chat.id,
@@ -110,6 +112,11 @@ export function deriveSidebarData(
         hasAutomation: false,
         canFork: canForkChat(chat, activeStatuses, drainingChatIds) || undefined,
       }))
+  }
+
+  const projectGroups: SidebarProjectGroup[] = projects.map((project) => {
+    const chats = toSidebarChatRows(project, chatsByProjectId.get(project.id) ?? [])
+    const archivedChats = toSidebarChatRows(project, archivedChatsByProjectId.get(project.id) ?? [])
     const { previewChats, olderChats } = getSidebarChatBuckets(chats, nowMs)
 
     return {
@@ -118,6 +125,7 @@ export function deriveSidebarData(
       chats,
       previewChats,
       olderChats,
+      ...(archivedChats.length ? { archivedChats } : {}),
       defaultCollapsed: chats.every((chat) => !isSidebarChatRecent(chat, nowMs)),
     }
   })
@@ -144,7 +152,7 @@ export function deriveLocalProjectsSnapshot(
   }
 
   for (const project of [...state.projectsById.values()].filter((entry) => !entry.deletedAt)) {
-    const chats = [...state.chatsById.values()].filter((chat) => chat.projectId === project.id && !chat.deletedAt)
+    const chats = [...state.chatsById.values()].filter((chat) => chat.projectId === project.id && !chat.deletedAt && !chat.archivedAt)
     const lastOpenedAt = chats.reduce(
       (latest, chat) => Math.max(latest, getSidebarChatSortTimestamp(chat)),
       project.updatedAt

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Code, Copy, FolderOpen, Pencil, Split, Trash2, UserRoundPlus } from "lucide-react"
+import { Archive, Code, Copy, EyeOff, FolderOpen, Pencil, Split, Trash2, UserRoundPlus } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -10,16 +10,18 @@ import {
 export function ProjectSectionMenu({
   editorLabel,
   onCopyPath,
+  onShowArchived,
   onOpenInFinder,
   onOpenInEditor,
-  onRemove,
+  onHide,
   children,
 }: {
   editorLabel: string
   onCopyPath: () => void
+  onShowArchived: () => void
   onOpenInFinder: () => void
   onOpenInEditor: () => void
-  onRemove: () => void
+  onHide: () => void
   children: ReactNode
 }) {
   return (
@@ -36,6 +38,15 @@ export function ProjectSectionMenu({
         >
           <Copy className="h-3.5 w-3.5" />
           <span className="text-xs font-medium">Copy Path</span>
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={(event) => {
+            event.stopPropagation()
+            onShowArchived()
+          }}
+        >
+          <Archive className="h-3.5 w-3.5" />
+          <span className="text-xs font-medium">Show Archived</span>
         </ContextMenuItem>
         <ContextMenuItem
           onSelect={(event) => {
@@ -58,12 +69,11 @@ export function ProjectSectionMenu({
         <ContextMenuItem
           onSelect={(event) => {
             event.stopPropagation()
-            onRemove()
+            onHide()
           }}
-          className="text-destructive dark:text-red-400 hover:bg-destructive/10 focus:bg-destructive/10 dark:hover:bg-red-500/20 dark:focus:bg-red-500/20"
         >
-          <Trash2 className="h-3.5 w-3.5" />
-          <span className="text-xs font-medium">Remove</span>
+          <EyeOff className="h-3.5 w-3.5" />
+          <span className="text-xs font-medium">Hide</span>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -76,6 +86,7 @@ export function ChatRowMenu({
   onShare,
   onOpenInFinder,
   onFork,
+  onArchive,
   onDelete,
   children,
 }: {
@@ -84,6 +95,7 @@ export function ChatRowMenu({
   onShare: () => void
   onOpenInFinder: () => void
   onFork: () => void
+  onArchive: () => void
   onDelete: () => void
   children: ReactNode
 }) {
@@ -130,6 +142,15 @@ export function ChatRowMenu({
         >
           <Split className="h-3.5 w-3.5" />
           <span className="text-xs font-medium">Fork</span>
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={(event) => {
+            event.preventDefault()
+            onArchive()
+          }}
+        >
+          <Archive className="h-3.5 w-3.5" />
+          <span className="text-xs font-medium">Archive</span>
         </ContextMenuItem>
         <ContextMenuItem
           onSelect={(event) => {

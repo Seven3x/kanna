@@ -217,6 +217,12 @@ function KannaLayout() {
   const handleSidebarShareChat = useCallback((chatId: string) => {
     void state.handleShareChat(chatId)
   }, [state.handleShareChat])
+  const handleSidebarArchiveChat = useCallback((chat: Parameters<typeof state.handleArchiveChat>[0]) => {
+    void state.handleArchiveChat(chat)
+  }, [state.handleArchiveChat])
+  const handleOpenArchivedChat = useCallback((chatId: string) => {
+    void state.handleOpenArchivedChat(chatId)
+  }, [state.handleOpenArchivedChat])
   const handleOpenAddProjectModal = useCallback(() => {
     state.openAddProjectModal()
   }, [state])
@@ -229,9 +235,9 @@ function KannaLayout() {
   const handleSidebarOpenExternalPath = useCallback((action: "open_finder" | "open_editor", localPath: string) => {
     void state.handleOpenExternalPath(action, localPath)
   }, [state.handleOpenExternalPath])
-  const handleSidebarRemoveProject = useCallback((projectId: string) => {
-    void state.handleRemoveProject(projectId)
-  }, [state.handleRemoveProject])
+  const handleSidebarHideProject = useCallback((projectId: string) => {
+    void state.handleHideProject(projectId)
+  }, [state.handleHideProject])
   const handleSidebarReorderProjectGroups = useCallback((projectIds: string[]) => {
     void state.handleReorderProjectGroups(projectIds)
   }, [state.handleReorderProjectGroups])
@@ -257,11 +263,13 @@ function KannaLayout() {
       keybindings={state.keybindings}
       onRenameChat={handleSidebarRenameChat}
       onShareChat={handleSidebarShareChat}
+      onArchiveChat={handleSidebarArchiveChat}
+      onOpenArchivedChat={handleOpenArchivedChat}
       onDeleteChat={handleSidebarDeleteChat}
       onOpenAddProjectModal={handleOpenAddProjectModal}
       onCopyPath={handleSidebarCopyPath}
       onOpenExternalPath={handleSidebarOpenExternalPath}
-      onRemoveProject={handleSidebarRemoveProject}
+      onHideProject={handleSidebarHideProject}
       onReorderProjectGroups={handleSidebarReorderProjectGroups}
       editorLabel={state.editorLabel}
       updateSnapshot={state.updateSnapshot}
@@ -272,13 +280,15 @@ function KannaLayout() {
     handleOpenAddProjectModal,
     handleSidebarCopyPath,
     handleSidebarCreateChat,
+    handleSidebarArchiveChat,
     handleSidebarDeleteChat,
+    handleOpenArchivedChat,
     handleSidebarForkChat,
     handleSidebarOpenExternalPath,
     handleSidebarRenameChat,
     handleSidebarShareChat,
     handleSidebarReorderProjectGroups,
-    handleSidebarRemoveProject,
+    handleSidebarHideProject,
     showMobileOpenButton,
     state.activeChatId,
     state.activeProjectId,
