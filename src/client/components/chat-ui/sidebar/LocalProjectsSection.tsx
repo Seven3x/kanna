@@ -1,5 +1,5 @@
 import { memo, type MouseEvent as ReactMouseEvent, type ReactNode, useMemo } from "react"
-import { ChevronRight, Ellipsis, Loader2, Minus, MoreHorizontal, Plus, SquarePen } from "lucide-react"
+import { ChevronRight, Loader2, MoreHorizontal, SquarePen } from "lucide-react"
 import {
   DndContext,
   PointerSensor,
