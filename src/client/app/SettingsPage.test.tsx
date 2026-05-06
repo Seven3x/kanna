@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { RefreshCw } from "lucide-react"
 import {
+  CodexAccountsCard,
   CodexUsageCard,
   ChangelogSection,
   formatCodexUsageDate,
@@ -228,6 +229,59 @@ describe("codex usage formatting", () => {
     expect(html).toContain("Load this local summary only when you explicitly request it.")
     expect(html).toContain("Load usage")
     expect(html).not.toContain("Loading Codex usage")
+  })
+})
+
+describe("CodexAccountsCard", () => {
+  test("renders auto-switch exclusion state for accounts", () => {
+    const html = renderToStaticMarkup(
+      <CodexAccountsCard
+        status="success"
+        snapshot={{
+          codexHome: "/tmp/.codex",
+          hasActiveAuth: true,
+          activeAccountId: "alpha.auth.json",
+          activeEmail: "alpha@example.com",
+          accounts: [
+            {
+              id: "alpha.auth.json",
+              email: "alpha@example.com",
+              plan: "pro",
+              authMode: "chatgpt",
+              isActive: true,
+              isAvailable: true,
+              autoSwitchDisabled: false,
+              lastRefresh: null,
+              lastActivatedAt: null,
+              lastChattedAt: null,
+            },
+            {
+              id: "beta.auth.json",
+              email: "beta@example.com",
+              plan: "pro",
+              authMode: "chatgpt",
+              isActive: false,
+              isAvailable: true,
+              autoSwitchDisabled: true,
+              lastRefresh: null,
+              lastActivatedAt: null,
+              lastChattedAt: null,
+            },
+          ],
+        }}
+        error={null}
+        switchingAccountId={null}
+        updatingAutoSwitchAccountId={null}
+        onRefresh={() => {}}
+        onSwitch={() => {}}
+        onToggleAutoSwitch={() => {}}
+      />
+    )
+
+    expect(html).toContain("Auto-switch allowed")
+    expect(html).toContain("Auto-switch excluded")
+    expect(html).toContain("Exclude auto-switch")
+    expect(html).toContain("Allow auto-switch")
   })
 })
 

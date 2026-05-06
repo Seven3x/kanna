@@ -684,8 +684,10 @@ export function ChatPage() {
             >
               <RightSidebar
                 projectId={projectId}
+                chatId={state.activeChatId}
                 localPath={state.runtime?.localPath}
                 skills={state.runtime?.skills}
+                socket={state.socket}
                 onClose={() => toggleRightSidebar(projectId)}
                 onOpenInEditor={(localPath) => {
                   void state.handleOpenExternalPath("open_editor", localPath)

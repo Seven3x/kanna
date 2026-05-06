@@ -78,6 +78,7 @@ export interface CodexAuthAccountSummary {
   authMode: CodexAuthMode
   isActive: boolean
   isAvailable: boolean
+  autoSwitchDisabled: boolean
   lastRefresh: string | null
   lastActivatedAt: number | null
   lastChattedAt: number | null
@@ -128,6 +129,7 @@ export function isClaudeContextWindow(value: unknown): value is ClaudeContextWin
 }
 
 export const CODEX_PROVIDER_MODELS = [
+  { id: "gpt-5.5", label: "GPT-5.5", supportsEffort: false },
   { id: "gpt-5.4", label: "GPT-5.4", supportsEffort: false },
   { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", supportsEffort: false },
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", supportsEffort: false },

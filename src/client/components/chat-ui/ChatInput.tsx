@@ -151,6 +151,15 @@ function createLockedComposerState(
   }
 }
 
+function composerStatesEqual(left: ComposerState | null | undefined, right: ComposerState | null | undefined) {
+  if (left === right) return true
+  if (!left || !right) return false
+  return left.provider === right.provider
+    && left.model === right.model
+    && left.planMode === right.planMode
+    && JSON.stringify(left.modelOptions) === JSON.stringify(right.modelOptions)
+}
+
 export function resolveLockedComposerState(args: {
   activeProvider: AgentProvider
   composerState: ComposerState
@@ -456,13 +465,15 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
     setLockedComposerStatesByChatId((current) => {
       const existing = current[chatId]
-      if (existing?.provider === activeProvider) return current
       const nextLockedState = resolveLockedComposerState({
         activeProvider,
         composerState,
         providerDefaults,
         lockedComposerState: existing ?? null,
       })
+      if (composerStatesEqual(existing, nextLockedState)) {
+        return current
+      }
       return {
         ...current,
         [chatId]: nextLockedState,
@@ -545,13 +556,7 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
       }
 
       const existing = current[chatId]
-      if (
-        existing
-        && existing.provider === next.provider
-        && existing.model === next.model
-        && existing.planMode === next.planMode
-        && JSON.stringify(existing.modelOptions) === JSON.stringify(next.modelOptions)
-      ) {
+      if (composerStatesEqual(existing, next)) {
         return current
       }
 

@@ -41,6 +41,12 @@ export interface TerminalSnapshot {
   signal?: number
 }
 
+export interface ChatUserPromptsExport {
+  fileName: string
+  content: string
+  count: number
+}
+
 export type TerminalEvent =
   | { type: "terminal.output"; terminalId: string; data: string }
   | { type: "terminal.exit"; terminalId: string; exitCode: number; signal?: number }
@@ -56,6 +62,7 @@ export type ClientCommand =
   | { type: "settings.readCodexUsage" }
   | { type: "settings.readCodexAccounts" }
   | { type: "settings.switchCodexAccount"; accountId: string }
+  | { type: "settings.setCodexAccountAutoSwitch"; accountId: string; disabled: boolean }
   | { type: "settings.writeKeybindings"; bindings: KeybindingsSnapshot["bindings"] }
   | {
       type: "system.openExternal"
@@ -83,6 +90,7 @@ export type ClientCommand =
     }
   | { type: "chat.cancel"; chatId: string }
   | { type: "chat.stopDraining"; chatId: string }
+  | { type: "chat.exportUserPrompts"; chatId: string }
   | { type: "chat.loadHistory"; chatId: string; beforeCursor: string; limit: number }
   | { type: "chat.respondTool"; chatId: string; toolUseId: string; result: unknown }
   | { type: "terminal.create"; projectId: string; terminalId: string; cols: number; rows: number; scrollback: number }
@@ -107,6 +115,7 @@ export type ServerCommandResult =
   | KeybindingsSnapshot
   | CodexUsageSnapshot
   | CodexAuthSnapshot
+  | ChatUserPromptsExport
 
 export type ServerEnvelope =
   | { v: 1; type: "snapshot"; id: string; snapshot: ServerSnapshot }

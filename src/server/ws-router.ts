@@ -11,7 +11,7 @@ import { ensureProjectDirectory } from "./paths"
 import { TerminalManager } from "./terminal-manager"
 import type { UpdateManager } from "./update-manager"
 import { deriveCodexUsageSnapshot } from "./codex-usage"
-import { readCodexAuthSnapshot, switchCodexAuthAccount } from "./codex-accounts"
+import { readCodexAuthSnapshot, setCodexAccountAutoSwitchDisabled, switchCodexAuthAccount } from "./codex-accounts"
 import { deriveChatSnapshot, deriveLocalProjectsSnapshot, deriveSidebarData } from "./read-models"
 
 const DEFAULT_CHAT_RECENT_LIMIT = 200
@@ -285,6 +285,11 @@ export function createWsRouter({
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
           break
         }
+        case "settings.setCodexAccountAutoSwitch": {
+          const snapshot = await setCodexAccountAutoSwitchDisabled(command.accountId, command.disabled)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
+          break
+        }
         case "settings.writeKeybindings": {
           const snapshot = await keybindings.write(command.bindings)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
@@ -375,6 +380,28 @@ export function createWsRouter({
         case "chat.stopDraining": {
           await agent.stopDraining(command.chatId)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id })
+          break
+        }
+        case "chat.exportUserPrompts": {
+          const chat = store.getChat(command.chatId)
+          if (!chat) {
+            throw new Error("Chat not found")
+          }
+          const messages = store.getMessages(command.chatId)
+          const prompts = messages
+            .filter((entry) => entry.kind === "user_prompt")
+            .map((entry) => entry.content.trim())
+            .filter(Boolean)
+          send(ws, {
+            v: PROTOCOL_VERSION,
+            type: "ack",
+            id,
+            result: {
+              fileName: `mila-user-prompts-${command.chatId}.txt`,
+              content: prompts.join("\n\n"),
+              count: prompts.length,
+            },
+          })
           break
         }
         case "chat.loadHistory": {

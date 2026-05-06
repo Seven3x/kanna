@@ -369,15 +369,19 @@ export function CodexAccountsCard({
   snapshot,
   error,
   switchingAccountId,
+  updatingAutoSwitchAccountId,
   onRefresh,
   onSwitch,
+  onToggleAutoSwitch,
 }: {
   status: CodexAccountsStatus
   snapshot: CodexAuthSnapshot | null
   error: string | null
   switchingAccountId: string | null
+  updatingAutoSwitchAccountId: string | null
   onRefresh: () => void
   onSwitch: (accountId: string) => void
+  onToggleAutoSwitch: (accountId: string, disabled: boolean) => void
 }) {
   if (status === "idle" || status === "loading") {
     return (
@@ -446,6 +450,7 @@ export function CodexAccountsCard({
         <div className="mt-4 max-h-[320px] space-y-2 overflow-y-auto pr-1">
           {snapshot.accounts.map((account) => {
             const isSwitching = switchingAccountId === account.id
+            const isUpdatingAutoSwitch = updatingAutoSwitchAccountId === account.id
             return (
               <div
                 key={account.id}
@@ -477,24 +482,43 @@ export function CodexAccountsCard({
                     <span>Activated {formatCodexAccountDate(account.lastActivatedAt)}</span>
                     <span>•</span>
                     <span>Chatted {formatCodexAccountDate(account.lastChattedAt)}</span>
+                    <span>•</span>
+                    <span>{account.autoSwitchDisabled ? "Auto-switch excluded" : "Auto-switch allowed"}</span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  disabled={account.isActive || isSwitching}
-                  onClick={() => onSwitch(account.id)}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors",
-                    account.isActive
-                      ? "cursor-default border-border bg-muted text-muted-foreground"
-                      : "border-border bg-background text-foreground hover:bg-muted",
-                    isSwitching && "opacity-70"
-                  )}
-                >
-                  {account.isActive ? <Check className="h-3.5 w-3.5" /> : null}
-                  {isSwitching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                  <span>{account.isActive ? "Active" : isSwitching ? "Switching…" : "Switch"}</span>
-                </button>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <button
+                    type="button"
+                    disabled={isUpdatingAutoSwitch}
+                    onClick={() => onToggleAutoSwitch(account.id, !account.autoSwitchDisabled)}
+                    className={cn(
+                      "inline-flex min-w-[132px] items-center justify-center rounded-md border px-3 py-2 text-xs font-medium transition-colors",
+                      account.autoSwitchDisabled
+                        ? "border-amber-300/60 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-300"
+                        : "border-border bg-background text-foreground hover:bg-muted",
+                      isUpdatingAutoSwitch && "opacity-70"
+                    )}
+                  >
+                    {isUpdatingAutoSwitch ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    <span>{account.autoSwitchDisabled ? "Allow auto-switch" : "Exclude auto-switch"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={account.isActive || isSwitching}
+                    onClick={() => onSwitch(account.id)}
+                    className={cn(
+                      "inline-flex min-w-[132px] items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors",
+                      account.isActive
+                        ? "cursor-default border-border bg-muted text-muted-foreground"
+                        : "border-border bg-background text-foreground hover:bg-muted",
+                      isSwitching && "opacity-70"
+                    )}
+                  >
+                    {account.isActive ? <Check className="h-3.5 w-3.5" /> : null}
+                    {isSwitching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    <span>{account.isActive ? "Active" : isSwitching ? "Switching…" : "Switch"}</span>
+                  </button>
+                </div>
               </div>
             )
           })}
@@ -691,6 +715,7 @@ export function SettingsPage() {
   const [codexAccounts, setCodexAccounts] = useState<CodexAuthSnapshot | null>(null)
   const [codexAccountsError, setCodexAccountsError] = useState<string | null>(null)
   const [switchingCodexAccountId, setSwitchingCodexAccountId] = useState<string | null>(null)
+  const [updatingCodexAutoSwitchAccountId, setUpdatingCodexAutoSwitchAccountId] = useState<string | null>(null)
   const selectedPage = resolveSettingsSectionId(sectionId) ?? "general"
   const isConnecting = state.connectionStatus === "connecting" || !state.localProjectsReady
   const machineName = state.localProjects?.machine.displayName ?? "Unavailable"
@@ -832,6 +857,25 @@ export function SettingsPage() {
       setCodexAccountsStatus("error")
     } finally {
       setSwitchingCodexAccountId(null)
+    }
+  }
+
+  async function setCodexAccountAutoSwitch(accountId: string, disabled: boolean) {
+    setUpdatingCodexAutoSwitchAccountId(accountId)
+    setCodexAccountsError(null)
+    try {
+      const snapshot = await state.socket.command<CodexAuthSnapshot>({
+        type: "settings.setCodexAccountAutoSwitch",
+        accountId,
+        disabled,
+      })
+      setCodexAccounts(snapshot)
+      setCodexAccountsStatus("success")
+    } catch (error) {
+      setCodexAccountsError(error instanceof Error ? error.message : "Unable to update Codex account auto-switch.")
+      setCodexAccountsStatus("error")
+    } finally {
+      setUpdatingCodexAutoSwitchAccountId(null)
     }
   }
 
@@ -1145,11 +1189,15 @@ export function SettingsPage() {
                           snapshot={codexAccounts}
                           error={codexAccountsError}
                           switchingAccountId={switchingCodexAccountId}
+                          updatingAutoSwitchAccountId={updatingCodexAutoSwitchAccountId}
                           onRefresh={() => {
                             void loadCodexAccounts()
                           }}
                           onSwitch={(accountId) => {
                             void switchCodexAccount(accountId)
+                          }}
+                          onToggleAutoSwitch={(accountId, disabled) => {
+                            void setCodexAccountAutoSwitch(accountId, disabled)
                           }}
                         />
                       </SettingsRow>

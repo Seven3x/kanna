@@ -59,6 +59,7 @@ describe("provider catalog normalization", () => {
 
   test("exposes the expanded Codex model catalog and preserves supported selections", () => {
     expect(getServerProviderCatalog("codex").models.map((model) => model.id)).toEqual([
+      "gpt-5.5",
       "gpt-5.4",
       "gpt-5.4-mini",
       "gpt-5.3-codex",

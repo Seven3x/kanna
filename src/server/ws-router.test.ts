@@ -236,6 +236,61 @@ describe("ws-router", () => {
     ])
   })
 
+  test("exports only user prompt text for a chat", () => {
+    const router = createWsRouter({
+      store: {
+        state: createEmptyState(),
+        getChat: () => ({ id: "chat-1" }),
+        getMessages: () => [
+          { _id: "entry-1", createdAt: 1, kind: "user_prompt", content: "first", attachments: [{ displayName: "skip.png" }] },
+          { _id: "entry-2", createdAt: 2, kind: "assistant_text", text: "ignore me" },
+          { _id: "entry-3", createdAt: 3, kind: "user_prompt", content: " second " },
+        ],
+      } as never,
+      agent: { getActiveStatuses: () => new Map(), getDrainingChatIds: () => new Set() } as never,
+      terminals: {
+        getSnapshot: () => null,
+        onEvent: () => () => {},
+      } as never,
+      keybindings: {
+        getSnapshot: () => DEFAULT_KEYBINDINGS_SNAPSHOT,
+        onChange: () => () => {},
+      } as never,
+      importCodexHistoryForProject: async () => ({ latestChatId: null, importedChatCount: 0 }),
+      refreshDiscovery: async () => [],
+      getDiscoveredProjects: () => [],
+      machineDisplayName: "Local Machine",
+      updateManager: null,
+    })
+    const ws = new FakeWebSocket()
+
+    router.handleMessage(
+      ws as never,
+      JSON.stringify({
+        v: 1,
+        type: "command",
+        id: "export-1",
+        command: {
+          type: "chat.exportUserPrompts",
+          chatId: "chat-1",
+        },
+      })
+    )
+
+    expect(ws.sent).toEqual([
+      {
+        v: PROTOCOL_VERSION,
+        type: "ack",
+        id: "export-1",
+        result: {
+          fileName: "mila-user-prompts-chat-1.txt",
+          content: "first\n\nsecond",
+          count: 2,
+        },
+      },
+    ])
+  })
+
   test("marks chats read and rebroadcasts sidebar snapshots", async () => {
     const state = createEmptyState()
     state.projectsById.set("project-1", {

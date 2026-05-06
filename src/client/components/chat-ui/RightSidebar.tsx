@@ -1,7 +1,9 @@
 import { type ReactNode, useEffect, useState } from "react"
-import { ChevronDown, ExternalLink, FilePenLine, GitBranch, History, Sparkles, X } from "lucide-react"
+import { ChevronDown, Download, ExternalLink, FilePenLine, GitBranch, History, MessageSquareText, Sparkles, X } from "lucide-react"
+import type { ChatUserPromptsExport } from "../../../shared/protocol"
 import type { ProjectGitCommitDetail, ProjectGitSnapshot } from "../../../shared/project-git"
 import type { ProjectSkillSummary } from "../../../shared/types"
+import type { KannaSocket } from "../../app/socket"
 import { fetchProjectGitCommitDetail, fetchProjectGitSnapshot } from "../../lib/projectGit"
 import { resolveProjectLocalFilePath } from "../../lib/projectFiles"
 import { cn } from "../../lib/utils"
@@ -82,8 +84,10 @@ function GitCommitRow({
 
 interface RightSidebarProps {
   projectId: string
+  chatId?: string | null
   localPath?: string
   skills?: ProjectSkillSummary[]
+  socket: KannaSocket
   onClose: () => void
   onOpenInEditor?: (localPath: string) => void
 }
@@ -217,12 +221,31 @@ function SkillItem({
   )
 }
 
-export function RightSidebar({ projectId, localPath, skills = [], onClose, onOpenInEditor }: RightSidebarProps) {
+function downloadTextFile(fileName: string, content: string) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+export function RightSidebar({ projectId, chatId, localPath, skills = [], socket, onClose, onOpenInEditor }: RightSidebarProps) {
   const [skillsExpanded, setSkillsExpanded] = useState(false)
+  const [exportExpanded, setExportExpanded] = useState(false)
   const [gitExpanded, setGitExpanded] = useState(false)
   const [gitHistoryExpanded, setGitHistoryExpanded] = useState(false)
   const [filesExpanded, setFilesExpanded] = useState(false)
   const [agentsDialogOpen, setAgentsDialogOpen] = useState(false)
+  const [exportState, setExportState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "success"; message: string }
+    | { status: "error"; message: string }
+  >({ status: "idle" })
   const [expandedSkillKey, setExpandedSkillKey] = useState<string | null>(null)
   const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(null)
   const [gitState, setGitState] = useState<
@@ -275,6 +298,25 @@ export function RightSidebar({ projectId, localPath, skills = [], onClose, onOpe
     : undefined
   const gitHistoryCount = gitState.status === "ready" ? gitState.data.recentCommits.length : undefined
 
+  async function handleExportUserPrompts() {
+    if (!chatId) {
+      setExportState({ status: "error", message: "No active chat to export." })
+      return
+    }
+
+    setExportState({ status: "loading" })
+    try {
+      const result = await socket.command<ChatUserPromptsExport>({ type: "chat.exportUserPrompts", chatId })
+      downloadTextFile(result.fileName, result.content)
+      setExportState({
+        status: "success",
+        message: result.count === 1 ? "Exported 1 user message." : `Exported ${result.count} user messages.`,
+      })
+    } catch (error) {
+      setExportState({ status: "error", message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   return (
     <div className="h-full min-h-0 border-l border-border bg-background md:min-w-[300px]">
       <div className="flex h-full min-h-0 flex-col">
@@ -320,6 +362,44 @@ export function RightSidebar({ projectId, localPath, skills = [], onClose, onOpe
             ) : null}
           </div>
         ) : null}
+
+        <div className="shrink-0 border-b border-border">
+          <SectionHeader
+            title="Export"
+            expanded={exportExpanded}
+            onToggle={() => setExportExpanded((current) => !current)}
+            icon={MessageSquareText}
+          />
+          {exportExpanded ? (
+            <div className="px-3 pb-3 pt-2">
+              <div className="rounded-xl border border-border bg-card px-3 py-3">
+                <div className="text-sm font-medium text-foreground">User messages</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Export only the text you typed in this chat. Attachments and file contents are skipped.
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={exportState.status === "loading" || !chatId}
+                  className="mt-3 h-8 rounded-lg px-2.5"
+                  onClick={handleExportUserPrompts}
+                >
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  {exportState.status === "loading" ? "Exporting..." : "Export user messages"}
+                </Button>
+                {exportState.status === "success" || exportState.status === "error" ? (
+                  <div className={cn(
+                    "mt-2 text-xs",
+                    exportState.status === "error" ? "text-destructive" : "text-muted-foreground"
+                  )}>
+                    {exportState.message}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </div>
 
         <div className="shrink-0 border-b border-border">
           <SectionHeader

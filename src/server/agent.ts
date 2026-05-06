@@ -24,7 +24,7 @@ import {
 } from "./provider-catalog"
 import { resolveClaudeApiModelId } from "../shared/types"
 import { fallbackTitleFromMessage } from "./generate-title"
-import { switchToNextCodexAuthAccount } from "./codex-accounts"
+import { markActiveCodexAccountChatted, switchToNextCodexAuthAccount } from "./codex-accounts"
 
 const CLAUDE_TOOLSET = [
   "Skill",
@@ -73,6 +73,7 @@ interface AgentCoordinatorArgs {
   codexManager?: CodexAppServerManager
   generateTitle?: (messageContent: string, cwd: string) => Promise<GenerateChatTitleResult>
   autoSwitchCodexAccount?: typeof switchToNextCodexAuthAccount
+  markCodexAccountChatted?: typeof markActiveCodexAccountChatted
 }
 
 function timestamped<T extends Omit<TranscriptEntry, "_id" | "createdAt">>(
@@ -644,6 +645,7 @@ export class AgentCoordinator {
   private readonly codexManager: CodexAppServerManager
   private readonly generateTitle: (messageContent: string, cwd: string) => Promise<GenerateChatTitleResult>
   private readonly autoSwitchCodexAccount: typeof switchToNextCodexAuthAccount
+  private readonly markCodexAccountChatted: typeof markActiveCodexAccountChatted
   private reportBackgroundError: ((message: string) => void) | null = null
   readonly activeTurns = new Map<string, ActiveTurn>()
   readonly drainingStreams = new Map<string, { turn: HarnessTurn }>()
@@ -654,6 +656,7 @@ export class AgentCoordinator {
     this.codexManager = args.codexManager ?? new CodexAppServerManager()
     this.generateTitle = args.generateTitle ?? generateTitleForChatDetailed
     this.autoSwitchCodexAccount = args.autoSwitchCodexAccount ?? switchToNextCodexAuthAccount
+    this.markCodexAccountChatted = args.markCodexAccountChatted ?? markActiveCodexAccountChatted
   }
 
   setBackgroundErrorReporter(report: ((message: string) => void) | null) {
@@ -917,6 +920,9 @@ export class AgentCoordinator {
     const chat = this.store.requireChat(chatId)
     const provider = this.resolveProvider(command, chat.provider)
     const settings = this.getProviderSettings(provider, command)
+    if (provider === "codex") {
+      await this.markCodexAccountChatted().catch(() => undefined)
+    }
     await this.startTurnForChat({
       chatId,
       provider,

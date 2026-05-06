@@ -172,6 +172,7 @@ describe("resolveLockedComposerState", () => {
       planMode: false,
     })
   })
+
 })
 
 describe("getStoredLockedComposerState", () => {

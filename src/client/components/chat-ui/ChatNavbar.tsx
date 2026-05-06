@@ -1,4 +1,4 @@
-import { Flower, Code, FolderOpen, Menu, PanelLeft, PanelRight, SquarePen, Terminal } from "lucide-react"
+import { Code, FolderOpen, Menu, PanelLeft, PanelRight, SquarePen, Terminal } from "lucide-react"
 import { Button } from "../ui/button"
 import { CardHeader } from "../ui/card"
 import { HotkeyTooltip, HotkeyTooltipContent, HotkeyTooltipTrigger } from "../ui/tooltip"
@@ -39,6 +39,15 @@ export function ChatNavbar({
   terminalShortcut,
   rightSidebarShortcut,
 }: Props) {
+  const logoImage = (
+    <img
+      src="/mila-logo.png"
+      alt="Mila"
+      className="size-full rounded-md object-contain"
+      draggable={false}
+    />
+  )
+
   return (
     <CardHeader
       className={cn(
@@ -60,7 +69,7 @@ export function ChatNavbar({
           {sidebarCollapsed && (
             <>
               <div className="flex items-center justify-center w-[36px] h-[36px]">
-                <Flower className="h-4 w-4 sm:h-5 sm:w-5 text-logo ml-1 hidden md:block" />
+                <div className="ml-1 hidden h-4 w-4 sm:h-5 sm:w-5 md:block">{logoImage}</div>
               </div>
               <Button
                 variant="ghost"

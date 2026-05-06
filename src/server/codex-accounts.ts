@@ -35,6 +35,8 @@ interface RegistryFile {
 
 interface AccountStateRecord {
   lastActivatedAt?: unknown
+  lastChattedAt?: unknown
+  autoSwitchDisabled?: unknown
 }
 
 type AccountsStateFile = Record<string, AccountStateRecord>
@@ -181,8 +183,12 @@ async function writeAccountsStateFile(codexHome: string, state: AccountsStateFil
 
 function isActiveAccount(candidate: CodexAccountFileSummary, activeAuth: ParsedAuthFile | null) {
   if (!activeAuth) return false
-  if (candidate.recordKey && activeAuth.recordKey && candidate.recordKey === activeAuth.recordKey) return true
-  if (candidate.openaiApiKey && activeAuth.openaiApiKey && candidate.openaiApiKey === activeAuth.openaiApiKey) return true
+  if (activeAuth.recordKey) {
+    return Boolean(candidate.recordKey && candidate.recordKey === activeAuth.recordKey)
+  }
+  if (activeAuth.openaiApiKey) {
+    return Boolean(candidate.openaiApiKey && candidate.openaiApiKey === activeAuth.openaiApiKey)
+  }
   if (candidate.email && activeAuth.email && candidate.email === activeAuth.email) return true
   return false
 }
@@ -214,9 +220,12 @@ async function readAccountsDirectory(accountsDir: string, activeAuth: ParsedAuth
         })
         const savedState = readObject(accountsState[entry.name])
         const savedLastActivatedAt = readNumber(savedState?.lastActivatedAt)
+        const savedLastChattedAt = readNumber(savedState?.lastChattedAt)
+        const autoSwitchDisabled = savedState?.autoSwitchDisabled === true
         const lastLocalRollout = readObject(registryRecord?.last_local_rollout)
         const lastUsedAt = secondsToMilliseconds(readNumber(registryRecord?.last_used_at))
         const derivedLastActivatedAt = parsed.recordKey && activeAccountKey === parsed.recordKey ? activeActivatedAt : null
+        const derivedLastChattedAt = readNumber(lastLocalRollout?.event_timestamp_ms) ?? lastUsedAt
         const summary: CodexAccountFileSummary = {
           id: entry.name,
           email: parsed.email,
@@ -224,9 +233,10 @@ async function readAccountsDirectory(accountsDir: string, activeAuth: ParsedAuth
           authMode: parsed.authMode,
           isActive: false,
           isAvailable: true,
+          autoSwitchDisabled,
           lastRefresh: parsed.lastRefresh,
           lastActivatedAt: Math.max(savedLastActivatedAt ?? 0, derivedLastActivatedAt ?? 0) || null,
-          lastChattedAt: readNumber(lastLocalRollout?.event_timestamp_ms) ?? lastUsedAt,
+          lastChattedAt: Math.max(savedLastChattedAt ?? 0, derivedLastChattedAt ?? 0) || null,
           absolutePath,
           recordKey: parsed.recordKey,
           openaiApiKey: parsed.openaiApiKey,
@@ -294,6 +304,42 @@ export async function switchCodexAuthAccount(accountId: string, homeDir?: string
   return readCodexAuthSnapshot(homeDir)
 }
 
+export async function setCodexAccountAutoSwitchDisabled(
+  accountId: string,
+  disabled: boolean,
+  homeDir?: string
+): Promise<CodexAuthSnapshot> {
+  const codexHome = resolveCodexHome(homeDir)
+  const snapshot = await readCodexAuthSnapshot(homeDir)
+  if (!snapshot.accounts.some((account) => account.id === accountId)) {
+    throw new Error("Codex account snapshot not found.")
+  }
+
+  const accountState = await readAccountsStateFile(codexHome)
+  accountState[accountId] = {
+    ...readObject(accountState[accountId]),
+    autoSwitchDisabled: disabled,
+  }
+  await writeAccountsStateFile(codexHome, accountState)
+  return readCodexAuthSnapshot(homeDir)
+}
+
+export async function markActiveCodexAccountChatted(homeDir?: string, timestamp = Date.now()) {
+  const codexHome = resolveCodexHome(homeDir)
+  const snapshot = await readCodexAuthSnapshot(homeDir)
+  if (!snapshot.activeAccountId) {
+    return snapshot
+  }
+
+  const accountState = await readAccountsStateFile(codexHome)
+  accountState[snapshot.activeAccountId] = {
+    ...readObject(accountState[snapshot.activeAccountId]),
+    lastChattedAt: timestamp,
+  }
+  await writeAccountsStateFile(codexHome, accountState)
+  return readCodexAuthSnapshot(homeDir)
+}
+
 function compareAccountOldestActivationFirst(left: CodexAuthAccountSummary, right: CodexAuthAccountSummary) {
   const leftActivatedAt = left.lastActivatedAt
   const rightActivatedAt = right.lastActivatedAt
@@ -314,7 +360,7 @@ export async function switchToNextCodexAuthAccount(homeDir?: string): Promise<{
 } | null> {
   const snapshot = await readCodexAuthSnapshot(homeDir)
   const nextAccount = [...snapshot.accounts]
-    .filter((account) => account.isAvailable && !account.isActive)
+    .filter((account) => account.isAvailable && !account.isActive && !account.autoSwitchDisabled)
     .sort(compareAccountOldestActivationFirst)[0]
 
   if (!nextAccount) {

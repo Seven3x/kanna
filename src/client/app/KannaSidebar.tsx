@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Flower, Loader2, PanelLeft, X, Menu, Plus, Settings } from "lucide-react"
+import { Loader2, PanelLeft, X, Menu, Plus, Settings } from "lucide-react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { APP_NAME } from "../../shared/branding"
 import { type KeybindingsSnapshot } from "../../shared/types"
@@ -55,6 +55,15 @@ export function KannaSidebar({
   editorLabel,
   keybindings,
 }: KannaSidebarProps) {
+  const logoImage = (
+    <img
+      src="/mila-logo.png"
+      alt="Mila"
+      className="size-full rounded-md object-contain"
+      draggable={false}
+    />
+  )
+
   const location = useLocation()
   const navigate = useNavigate()
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -199,7 +208,7 @@ export function KannaSidebar({
       {collapsed && isUtilityPageActive && (
         <div className="hidden md:flex fixed left-0 top-0 h-full z-40 items-start pt-4 pl-5 border-l border-border/0">
           <div className="flex items-center gap-1">
-            <Flower className="size-6 text-logo" />
+            <div className="size-6 shrink-0">{logoImage}</div>
             <Button
               variant="ghost"
               size="icon"
@@ -229,10 +238,12 @@ export function KannaSidebar({
               title="Collapse sidebar"
               className="hidden md:flex group/sidebar-collapse relative items-center justify-center h-5 w-5 sm:h-6 sm:w-6"
             >
-              <Flower className="absolute inset-0.5 h-4 w-4 sm:h-5 sm:w-5 text-logo transition-all duration-200 ease-out opacity-100 scale-100 group-hover/sidebar-collapse:opacity-0 group-hover/sidebar-collapse:scale-0" />
+              <span className="absolute inset-0.5 transition-all duration-200 ease-out opacity-100 scale-100 group-hover/sidebar-collapse:opacity-0 group-hover/sidebar-collapse:scale-0">
+                {logoImage}
+              </span>
               <PanelLeft className="absolute inset-0 h-4 w-4 sm:h-6 sm:w-6 text-slate-500 dark:text-slate-400 transition-all duration-200 ease-out opacity-0 scale-0 group-hover/sidebar-collapse:opacity-100 group-hover/sidebar-collapse:scale-80 hover:opacity-50" />
             </button>
-            <Flower className="h-5 w-5 sm:h-6 sm:w-6 text-logo md:hidden" />
+            <div className="h-5 w-5 sm:h-6 sm:w-6 shrink-0 md:hidden">{logoImage}</div>
             <span className="font-logo text-base uppercase sm:text-md text-slate-600 dark:text-slate-100">{APP_NAME}</span>
             
           </div>

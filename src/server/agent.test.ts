@@ -285,6 +285,61 @@ describe("AgentCoordinator codex integration", () => {
     expect(store.chat.title).toBe("Manual title")
   })
 
+  test("marks the active codex account as chatted when sending a codex turn", async () => {
+    let chattedMarked = 0
+    const fakeCodexManager = {
+      async startSession() {},
+      async startTurn(): Promise<HarnessTurn> {
+        async function* stream() {
+          yield {
+            type: "transcript" as const,
+            entry: timestamped({
+              kind: "result",
+              subtype: "success",
+              isError: false,
+              durationMs: 0,
+              result: "",
+            }),
+          }
+        }
+
+        return {
+          provider: "codex",
+          stream: stream(),
+          interrupt: async () => {},
+          close: () => {},
+        }
+      },
+    }
+
+    const store = createFakeStore()
+    const coordinator = new AgentCoordinator({
+      store: store as never,
+      onStateChange: () => {},
+      codexManager: fakeCodexManager as never,
+      markCodexAccountChatted: async () => {
+        chattedMarked += 1
+        return {
+          codexHome: "/tmp/.codex",
+          hasActiveAuth: true,
+          activeAccountId: "alpha.auth.json",
+          activeEmail: "alpha@example.com",
+          accounts: [],
+        }
+      },
+    })
+
+    await coordinator.send({
+      type: "chat.send",
+      chatId: "chat-1",
+      provider: "codex",
+      content: "hello",
+      model: "gpt-5.4",
+    })
+
+    expect(chattedMarked).toBe(1)
+  })
+
   test("reports provider failure without a second rename after the optimistic title", async () => {
     const fakeCodexManager = {
       async startSession() {},
@@ -1211,6 +1266,7 @@ describe("AgentCoordinator codex integration", () => {
           authMode: "chatgpt",
           isActive: true,
           isAvailable: true,
+          autoSwitchDisabled: false,
           lastRefresh: null,
           lastActivatedAt: null,
           lastChattedAt: null,

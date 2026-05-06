@@ -54,6 +54,7 @@ export const MODEL_ICON_BY_ID: Record<string, typeof Box> = {
   opus: Box,
   sonnet: Box,
   haiku: Box,
+  "gpt-5.5": Box,
   "gpt-5.4": Box,
   "gpt-5.4-mini": Box,
   "gpt-5.3-codex": Box,
