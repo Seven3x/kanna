@@ -217,6 +217,10 @@ export type ClientCommand =
   | { type: "terminal.input"; terminalId: string; data: string }
   | { type: "terminal.resize"; terminalId: string; cols: number; rows: number }
   | { type: "terminal.close"; terminalId: string }
+  | { type: "settings.readCodexUsage" }
+  | { type: "settings.readCodexAccounts" }
+  | { type: "settings.switchCodexAccount"; accountId: string }
+  | { type: "settings.setCodexAccountAutoSwitch"; accountId: string; disabled: boolean }
 
 export type OpenExternalAction = Extract<ClientCommand, { type: "system.openExternal" }>["action"]
 

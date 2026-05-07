@@ -30,6 +30,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Textarea } from "../ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "../ui/dialog"
+import { ProjectFilesSidebar } from "./ProjectFilesSidebar"
 
 type DiffRenderMode = "unified" | "split"
 type DiffFile = ChatDiffSnapshot["files"][number]
@@ -83,10 +84,12 @@ export interface DiffFileActions {
 
 interface RightSidebarProps extends DiffFileActions {
   projectId: string | null
+  localPath?: string
   diffs: ChatDiffSnapshot
   editorLabel: string
   diffRenderMode: DiffRenderMode
   wrapLines: boolean
+  onOpenInEditor?: (filePath: string) => void
   onLoadPatch: (path: string) => Promise<string>
   onListBranches: () => Promise<ChatBranchListResult>
   onPreviewMergeBranch: (branch: ChatBranchListEntry) => Promise<ChatMergePreviewResult>
@@ -1420,10 +1423,12 @@ function DiffFileCard({
 
 function RightSidebarImpl({
   projectId,
+  localPath,
   diffs,
   editorLabel,
   diffRenderMode,
   wrapLines,
+  onOpenInEditor,
   onOpenFile,
   onOpenInFinder,
   onDiscardFile,
@@ -1792,6 +1797,7 @@ function RightSidebarImpl({
                       options={[
                         { value: "changes", label: "Changes"},
                         { value: "history", label: "History" },
+                        { value: "files", label: "Files" },
                       ]}
                     />
                   </div>
@@ -1825,7 +1831,13 @@ function RightSidebarImpl({
             </div>
           </div>
           <div ref={scrollContainerRef} className="h-full overflow-y-auto [scrollbar-gutter:stable]">
-            {diffs.status === "no_repo" ? (
+            {viewMode === "files" && projectId ? (
+              <ProjectFilesSidebar
+                projectId={projectId}
+                localPath={localPath}
+                onOpenInEditor={onOpenInEditor}
+              />
+            ) : diffs.status === "no_repo" ? (
               <div className="flex h-full items-center justify-center px-6 py-3 text-center">
                 <div className="flex max-w-[280px] flex-col items-center gap-3">
                   <p className="text-sm text-muted-foreground">Initialize git here to start tracking branches, diffs, and history.</p>

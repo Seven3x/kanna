@@ -28,15 +28,21 @@ export async function openExternal(command: OpenExternalCommand) {
     if (!info) {
       throw new Error(`Path not found: ${resolvedPath}`)
     }
-    const editorCommand = buildEditorCommand({
-      localPath: resolvedPath,
-      isDirectory: info.isDirectory(),
-      line: command.line,
-      column: command.column,
-      editor: command.editor ?? DEFAULT_EDITOR_SETTINGS,
-      platform,
-    })
-    await spawnDetached(editorCommand.command, editorCommand.args)
+    try {
+      const editorCommand = buildEditorCommand({
+        localPath: resolvedPath,
+        isDirectory: info.isDirectory(),
+        line: command.line,
+        column: command.column,
+        editor: command.editor ?? DEFAULT_EDITOR_SETTINGS,
+        platform,
+      })
+      await spawnDetached(editorCommand.command, editorCommand.args)
+    } catch {
+      // Fall back to opening with the system default if the editor isn't available
+      const defaultCommand = buildDefaultOpenCommand({ localPath: resolvedPath, platform })
+      await spawnDetached(defaultCommand.command, defaultCommand.args)
+    }
     return
   }
 

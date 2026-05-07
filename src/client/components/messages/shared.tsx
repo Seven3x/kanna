@@ -9,6 +9,7 @@ import {
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react"
+import { X } from "lucide-react"
 import { Button } from "../ui/button"
 import {
   ArrowDownToLine,
@@ -246,6 +247,47 @@ function withChildClassName(node: MarkdownChildNode, className: string): Markdow
   })
 }
 
+// Clickable image component for inline markdown images
+function ClickableMarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  const [open, setOpen] = useState(false)
+  if (!src) return null
+  return (
+    <>
+      <button
+        type="button"
+        className="inline-block cursor-pointer"
+        onClick={() => setOpen(true)}
+      >
+        <img
+          src={src}
+          alt={alt}
+          className="max-w-full max-h-96 rounded-lg border border-border hover:opacity-90 transition-opacity"
+        />
+      </button>
+      {open ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setOpen(false)}
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 rounded-full bg-background/20 p-2 text-white hover:bg-background/40 transition-colors"
+            onClick={() => setOpen(false)}
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={src}
+            alt={alt}
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
+    </>
+  )
+}
+
 // Markdown component overrides
 export const markdownComponents = {
   h1: ({ children }: { children?: ReactNode }) => (
@@ -353,6 +395,10 @@ export const markdownComponents = {
         </blockquote>
       )
     })()
+  ),
+
+  img: ({ src, alt }: ComponentPropsWithoutRef<"img">) => (
+    <ClickableMarkdownImage src={src} alt={alt} />
   ),
 
   a: ({ children, ...props }: ComponentPropsWithoutRef<"a">) => (

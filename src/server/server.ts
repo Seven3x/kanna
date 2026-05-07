@@ -17,6 +17,8 @@ import { TerminalManager } from "./terminal-manager"
 import { UpdateManager } from "./update-manager"
 import type { UpdateInstallAttemptResult } from "./cli-runtime"
 import { createWsRouter, type ClientState } from "./ws-router"
+import { CodexHistoryImporter } from "./codex-history"
+import { handleProjectFilesRequest } from "./project-files"
 import { deleteProjectUpload, inferAttachmentContentType, inferProjectFileContentType, persistProjectUpload } from "./uploads"
 import { getProjectUploadDir } from "./paths"
 
@@ -138,6 +140,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
       router.scheduleBroadcast()
     },
   })
+  const codexImporter = new CodexHistoryImporter()
   router = createWsRouter({
     store,
     diffStore,
@@ -150,6 +153,15 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
       read: readLlmProviderSnapshot,
       write: writeLlmProviderSnapshot,
       validate: validateLlmProviderCredentials,
+    },
+    importCodexHistoryForProject: async (projectId: string, localPath: string) => {
+      const result = await codexImporter.importSessionsForProject(localPath, projectId, store)
+      if (result.warnings.length > 0) {
+        for (const warning of result.warnings) {
+          console.warn(`[kanna] Codex history import: ${warning}`)
+        }
+      }
+      return { latestChatId: result.latestChatId, importedChatCount: result.importedChatCount }
     },
     refreshDiscovery,
     getDiscoveredProjects: () => discoveredProjects,
@@ -245,6 +257,11 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
           const projectFileContentResponse = await handleProjectFileContent(req, url, store)
           if (projectFileContentResponse) {
             return projectFileContentResponse
+          }
+
+          const projectFilesResponse = await handleProjectFilesRequest(req, store)
+          if (projectFilesResponse) {
+            return projectFilesResponse
           }
 
           return serveStatic(distDir, url.pathname)

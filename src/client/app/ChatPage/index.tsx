@@ -23,6 +23,7 @@ import { useTerminalPreferencesStore } from "../../stores/terminalPreferencesSto
 import { shouldCloseTerminalPane } from "../terminalLayoutResize"
 import { TERMINAL_TOGGLE_ANIMATION_DURATION_MS } from "../terminalToggleAnimation"
 import { useRightSidebarToggleAnimation } from "../useRightSidebarToggleAnimation"
+import { resolveProjectLocalFilePath } from "../../lib/projectFiles"
 import { useStickyChatFocus } from "../useStickyChatFocus"
 import { useTerminalToggleAnimation } from "../useTerminalToggleAnimation"
 import type { KannaState } from "../useKannaState"
@@ -898,6 +899,12 @@ export function ChatPage() {
           queuedMessages={state.queuedMessages}
           transcriptPaddingBottom={transcriptPaddingBottom}
           localPath={state.runtime?.localPath}
+          projectId={state.activeProjectId}
+          onOpenInEditor={(filePath: string) => {
+            const resolved = state.runtime?.localPath
+            if (!resolved) return
+            void state.handleOpenExternalPath("open_editor", resolveProjectLocalFilePath(resolved, filePath))
+          }}
           latestToolIds={state.latestToolIds}
           isHistoryLoading={state.isHistoryLoading}
           hasOlderHistory={state.hasOlderHistory}
@@ -979,10 +986,16 @@ export function ChatPage() {
 
     return {
       projectId,
+      localPath: state.runtime?.localPath,
       diffs: state.chatDiffSnapshot ?? EMPTY_DIFF_SNAPSHOT,
       editorLabel: state.editorLabel,
       diffRenderMode,
       wrapLines: wrapDiffLines,
+      onOpenInEditor: (filePath: string) => {
+        const resolved = state.runtime?.localPath
+        if (!resolved) return
+        void state.handleOpenExternalPath("open_editor", resolveProjectLocalFilePath(resolved, filePath))
+      },
       onOpenFile: handleOpenDiffFile,
       onOpenInFinder: handleOpenDiffInFinder,
       onDiscardFile: handleDiscardDiffFile,

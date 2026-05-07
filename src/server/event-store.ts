@@ -7,14 +7,19 @@ import type { AgentProvider, ChatHistoryPage, ChatHistorySnapshot, QueuedChatMes
 import { STORE_VERSION } from "../shared/types"
 import {
   type ChatEvent,
+  type ChatRecord,
   type ProjectEvent,
   type QueuedMessageEvent,
   type SnapshotFile,
   type StoreEvent,
   type StoreState,
   type TurnEvent,
+  type ExternalChatRecord,
   cloneTranscriptEntries,
   createEmptyState,
+  externalSessionKey,
+  externalRecordsEqual,
+  normalizeExternalChatRecord,
 } from "./events"
 import { resolveLocalPath } from "./paths"
 
@@ -103,10 +108,12 @@ function getReplayEventPriority(event: StoreEvent) {
       return 8
     case "chat_read_state_set":
       return 9
+    case "chat_external_metadata_set":
+      return 11
     case "chat_deleted":
     case "chat_archived":
     case "chat_unarchived":
-      return 10
+      return 12
   }
 }
 
@@ -227,11 +234,19 @@ export class EventStore {
         this.state.projectIdsByPath.set(project.localPath, project.id)
       }
       for (const chat of parsed.chats) {
+        const external = chat.external ? normalizeExternalChatRecord(chat.external as ExternalChatRecord) : null
         this.state.chatsById.set(chat.id, {
           ...chat,
           unread: chat.unread ?? false,
           pendingForkSessionToken: chat.pendingForkSessionToken ?? null,
+          external,
         })
+        if (external) {
+          this.state.chatIdsByExternalSession.set(
+            externalSessionKey(external.provider, external.externalSessionId),
+            chat.id,
+          )
+        }
       }
       this.legacySidebarProjectOrder = normalizeSidebarProjectOrder(parsed.sidebarProjectOrder)
       if (parsed.queuedMessages?.length) {
@@ -258,6 +273,7 @@ export class EventStore {
     this.state.projectsById.clear()
     this.state.projectIdsByPath.clear()
     this.state.chatsById.clear()
+    this.state.chatIdsByExternalSession.clear()
     this.state.queuedMessagesByChatId.clear()
     this.sidebarProjectOrder = []
     this.legacySidebarProjectOrder = []
@@ -444,7 +460,7 @@ export class EventStore {
         break
       }
       case "chat_created": {
-      const chat = {
+        const chat: ChatRecord = {
           id: event.chatId,
           projectId: event.projectId,
           title: event.title,
@@ -457,6 +473,7 @@ export class EventStore {
           pendingForkSessionToken: null,
           hasMessages: false,
           lastTurnOutcome: null,
+          external: null,
         }
         this.state.chatsById.set(chat.id, chat)
         break
@@ -588,6 +605,22 @@ export class EventStore {
         chat.updatedAt = event.timestamp
         break
       }
+      case "chat_external_metadata_set": {
+        const chat = this.state.chatsById.get(event.chatId)
+        if (!chat) break
+        if (chat.external) {
+          this.state.chatIdsByExternalSession.delete(
+            externalSessionKey(chat.external.provider, chat.external.externalSessionId)
+          )
+        }
+        chat.external = normalizeExternalChatRecord(event.external)
+        chat.updatedAt = event.timestamp
+        this.state.chatIdsByExternalSession.set(
+          externalSessionKey(chat.external.provider, chat.external.externalSessionId),
+          chat.id,
+        )
+        break
+      }
     }
   }
 
@@ -655,6 +688,130 @@ export class EventStore {
     }
     await this.append(this.projectsLogPath, event)
     return this.state.projectsById.get(projectId)!
+  }
+
+  async upsertImportedChatFromExternalSession(args: {
+    projectId: string
+    provider: "codex"
+    title: string
+    sessionToken: string
+    external: ExternalChatRecord
+    entries: TranscriptEntry[]
+  }): Promise<{
+    created: boolean
+    appendedCount: number
+    chat: ChatRecord
+  }> {
+    let chat = this.getChatByExternalSession(args.provider, args.external.externalSessionId)
+    let created = false
+
+    if (!chat || chat.deletedAt) {
+      const external = normalizeExternalChatRecord(args.external)
+      const chatId = crypto.randomUUID()
+      const createdAt = Date.now()
+
+      const createEvent: ChatEvent = {
+        v: STORE_VERSION,
+        type: "chat_created",
+        timestamp: createdAt,
+        chatId,
+        projectId: args.projectId,
+        title: args.title,
+      }
+      await this.append(this.chatsLogPath, createEvent)
+
+      const providerEvent: ChatEvent = {
+        v: STORE_VERSION,
+        type: "chat_provider_set",
+        timestamp: createdAt,
+        chatId,
+        provider: args.provider,
+      }
+      await this.append(this.chatsLogPath, providerEvent)
+
+      const sessionEvent: TurnEvent = {
+        v: STORE_VERSION,
+        type: "session_token_set",
+        timestamp: createdAt,
+        chatId,
+        sessionToken: args.sessionToken,
+      }
+      await this.append(this.turnsLogPath, sessionEvent)
+
+      const externalEvent: ChatEvent = {
+        v: STORE_VERSION,
+        type: "chat_external_metadata_set",
+        timestamp: createdAt,
+        chatId,
+        external,
+      }
+      await this.append(this.chatsLogPath, externalEvent)
+
+      chat = this.state.chatsById.get(chatId)!
+      created = true
+    } else {
+      const previousImportedTitle = chat.external?.title
+      const external = normalizeExternalChatRecord({
+        ...args.external,
+        importedAt: chat.external?.importedAt ?? args.external.importedAt,
+      })
+      if (chat.external == null || !externalRecordsEqual(chat.external, external)) {
+        const externalEvent: ChatEvent = {
+          v: STORE_VERSION,
+          type: "chat_external_metadata_set",
+          timestamp: Date.now(),
+          chatId: chat.id,
+          external,
+        }
+        await this.append(this.chatsLogPath, externalEvent)
+      }
+
+      if (!chat.sessionToken || chat.sessionToken !== args.sessionToken) {
+        const sessionEvent: TurnEvent = {
+          v: STORE_VERSION,
+          type: "session_token_set",
+          timestamp: Date.now(),
+          chatId: chat.id,
+          sessionToken: args.sessionToken,
+        }
+        await this.append(this.turnsLogPath, sessionEvent)
+      }
+
+      const titleToUse = previousImportedTitle ?? args.title
+      if (chat.title !== titleToUse) {
+        const renameEvent: ChatEvent = {
+          v: STORE_VERSION,
+          type: "chat_renamed",
+          timestamp: Date.now(),
+          chatId: chat.id,
+          title: titleToUse,
+        }
+        await this.append(this.chatsLogPath, renameEvent)
+      }
+    }
+
+    const existingEntries = this.getMessages(chat.id)
+    const existingEntryIds = new Set(existingEntries.map((entry) => entry._id))
+    const newEntries = args.entries.filter((entry) => !existingEntryIds.has(entry._id))
+    const appendedCount = newEntries.length
+
+    if (newEntries.length > 0) {
+      const transcriptPath = this.transcriptPath(chat.id)
+      const payload = newEntries.map((entry) => JSON.stringify(entry)).join("\n")
+      this.writeChain = this.writeChain.then(async () => {
+        await mkdir(this.transcriptsDir, { recursive: true })
+        await appendFile(transcriptPath, `${payload}\n`, "utf8")
+        for (const entry of newEntries) {
+          this.applyMessageMetadata(chat!.id, entry)
+        }
+        if (this.cachedTranscript?.chatId === chat!.id) {
+          this.cachedTranscript.entries.push(...newEntries.map((entry) => ({ ...entry })))
+        }
+      })
+      await this.writeChain
+    }
+
+    return { created, appendedCount, chat: { ...chat } }
   }
 
   async removeProject(projectId: string) {
@@ -1043,6 +1200,12 @@ export class EventStore {
     const chat = this.state.chatsById.get(chatId)
     if (!chat || chat.deletedAt) return null
     return chat
+  }
+
+  getChatByExternalSession(provider: string, externalSessionId: string) {
+    const chatId = this.state.chatIdsByExternalSession.get(externalSessionKey(provider, externalSessionId))
+    if (!chatId) return null
+    return this.getChat(chatId)
   }
 
   getSidebarProjectOrder() {

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Kanna" width="80" />
+  <img src="assets/icon.png" alt="Mila" width="80" />
 </p>
 
-<h1 align="center">Kanna</h1>
+<h1 align="center">Mila</h1>
 
 <p align="center">
   <strong>A beautiful web UI for the Claude Code & Codex CLIs</strong>
@@ -18,7 +18,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot.png" />
     <source media="(prefers-color-scheme: light)" srcset="assets/screenshot-light.png" />
-    <img src="assets/screenshot.png" alt="Kanna screenshot" width="800" />
+    <img src="assets/screenshot.png" alt="Mila screenshot" width="800" />
   </picture>
 </p>
 
@@ -42,7 +42,7 @@ Then run from any project directory:
 kanna
 ```
 
-That's it. Kanna opens in your browser at [`localhost:3210`](http://localhost:3210).
+That's it. Mila opens in your browser at [`localhost:3210`](http://localhost:3210).
 
 ## Features
 
@@ -88,7 +88,7 @@ Embedded terminal support uses Bun's native PTY APIs and currently works on macO
 
 ## Install
 
-Install Kanna globally:
+Install Mila globally:
 
 ```bash
 bun install -g kanna-code
@@ -124,7 +124,7 @@ Default URL: `http://localhost:3210`
 
 ### Network access (Tailscale / LAN)
 
-By default Kanna binds to `127.0.0.1` (localhost only). Use `--host` to bind a specific interface, or `--remote` as a shorthand for `0.0.0.0`:
+By default Mila binds to `127.0.0.1` (localhost only). Use `--host` to bind a specific interface, or `--remote` as a shorthand for `0.0.0.0`:
 
 ```bash
 kanna --remote                     # bind all interfaces — browser opens localhost:3210
@@ -144,7 +144,7 @@ kanna --password my-secret
 bun run dev --password my-secret
 ```
 
-Kanna verifies the password once, then sets a browser-session cookie. The password itself is not stored in the browser.
+Mila verifies the password once, then sets a browser-session cookie. The password itself is not stored in the browser.
 When password protection is enabled, the backend requires authentication for API routes and `/ws`. The SPA shell still loads, `/health` remains public for restart detection, and the same in-app password screen is used in both dev and production.
 
 ### Public share link
@@ -172,8 +172,8 @@ Local URL:
 http://localhost:3210
 ```
 
-With `--cloudflared <token>`, Kanna runs `cloudflared tunnel run --token <token> --url <local-url>`.
-If Kanna can detect the public hostname from cloudflared output, it prints the same QR/public/local block.
+With `--cloudflared <token>`, Mila runs `cloudflared tunnel run --token <token> --url <local-url>`.
+If Mila can detect the public hostname from cloudflared output, it prints the same QR/public/local block.
 If not, it keeps the tunnel running, warns that no public hostname was detected, and prints the local URL so you can use the hostname already configured for that tunnel in Cloudflare.
 
 ## Development
@@ -255,7 +255,7 @@ All state is stored locally at `~/.kanna/data/`:
 | `turns.jsonl`    | Agent turn start/finish/cancel events     |
 | `snapshot.json`  | Compacted state snapshot for fast startup |
 
-Event logs are append-only JSONL. On startup, Kanna replays the log tail after the last snapshot, then compacts if the logs exceed 2 MB.
+Event logs are append-only JSONL. On startup, Mila replays the log tail after the last snapshot, then compacts if the logs exceed 2 MB.
 
 ## Star History
 

@@ -5,6 +5,7 @@ import { AnimatedShinyText } from "../../components/ui/animated-shiny-text"
 import { DrainingIndicator } from "../../components/messages/DrainingIndicator"
 import { QueuedUserMessage } from "../../components/messages/QueuedUserMessage"
 import { OpenLocalLinkProvider, type OpenLocalLinkTarget } from "../../components/messages/shared"
+import { ProjectFilePreviewDialog } from "../../components/messages/ProjectFilePreviewDialog"
 import { ProcessingMessage } from "../../components/messages/ProcessingMessage"
 import { ContextMenu, ContextMenuTrigger } from "../../components/ui/context-menu"
 import { OpenExternalContextMenuContent } from "../../components/open-external-menu"
@@ -51,6 +52,8 @@ interface ChatTranscriptViewportProps {
   isEmptyStateTypingComplete: boolean
   isPageFileDragActive: boolean
   showEmptyState: boolean
+  projectId?: string | null
+  onOpenInEditor?: (filePath: string) => void
   editorPreset?: EditorPreset
   editorCommandTemplate?: string
   platform?: NodeJS.Platform
@@ -85,6 +88,8 @@ export const ChatTranscriptViewport = memo(function ChatTranscriptViewport({
   isEmptyStateTypingComplete,
   isPageFileDragActive,
   showEmptyState,
+  projectId,
+  onOpenInEditor,
   editorPreset = "cursor",
   editorCommandTemplate,
   platform = "darwin",
@@ -94,6 +99,7 @@ export const ChatTranscriptViewport = memo(function ChatTranscriptViewport({
   const localLinkMenuTriggerRef = useRef<HTMLSpanElement | null>(null)
   const [toolGroupExpanded, setToolGroupExpanded] = useState<Record<string, boolean>>({})
   const [localLinkMenuTarget, setLocalLinkMenuTarget] = useState<OpenLocalLinkTarget | null>(null)
+  const [previewDialog, setPreviewDialog] = useState<{ filePath: string } | null>(null)
   const isMac = platform === "darwin"
 
   const rawRows = useMemo(() => buildResolvedTranscriptRows(messages, {
@@ -189,6 +195,16 @@ export const ChatTranscriptViewport = memo(function ChatTranscriptViewport({
 
   const handleOpenLocalLinkClick = useCallback((target: OpenLocalLinkTarget) => {
     if (target.trigger !== "contextmenu") {
+      // Show inline preview for files within the project
+      if (projectId && localPath) {
+        const withSlash = localPath.endsWith("/") ? localPath : `${localPath}/`
+        if (target.path.startsWith(withSlash) || target.path === localPath) {
+          const relativePath = target.path === localPath ? "" : target.path.slice(withSlash.length)
+          setPreviewDialog({ filePath: relativePath || "/" })
+          return
+        }
+      }
+      // Fall back to external open for files outside the project
       const action = shouldOpenLocalFileLinkInEditor(target.path) ? "open_editor" : "open_default"
       void onOpenLocalLink(target, action)
       return
@@ -208,7 +224,7 @@ export const ChatTranscriptViewport = memo(function ChatTranscriptViewport({
         view: window,
       }))
     })
-  }, [onOpenLocalLink])
+  }, [localPath, onOpenLocalLink, projectId])
 
   const renderItem = useCallback(({ item }: { item: ResolvedTranscriptRow }) => (
     <div className="mx-auto w-full max-w-[800px] pb-5" data-transcript-row-id={item.id}>
@@ -315,6 +331,18 @@ export const ChatTranscriptViewport = memo(function ChatTranscriptViewport({
           />
         ) : null}
       </ContextMenu>
+
+      {projectId && previewDialog ? (
+        <ProjectFilePreviewDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setPreviewDialog(null)
+          }}
+          projectId={projectId}
+          filePath={previewDialog.filePath}
+          onOpenInEditor={onOpenInEditor}
+        />
+      ) : null}
 
       {showEmptyState ? (
         <div

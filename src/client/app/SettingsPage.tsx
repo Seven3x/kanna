@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react"
 import {
   BookText,
+  Check,
   Command,
   Code,
   ExternalLink,
@@ -10,6 +11,7 @@ import {
   Monitor,
   Moon,
   MessageSquareQuote,
+  RefreshCwOff,
   Search,
   Settings2,
   Sun,
@@ -21,7 +23,7 @@ import {
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useNavigate, useOutletContext, useParams } from "react-router-dom"
-import { getKeybindingsFilePathDisplay, SDK_CLIENT_APP } from "../../shared/branding"
+import { APP_NAME, getKeybindingsFilePathDisplay, SDK_CLIENT_APP } from "../../shared/branding"
 import { ANALYTICS_STATIC_EVENT_NAMES, ANALYTICS_STATIC_PROPERTY_NAMES } from "../../shared/analytics"
 import {
   DEFAULT_KEYBINDINGS,
@@ -29,6 +31,8 @@ import {
   DEFAULT_OPENROUTER_SDK_MODEL,
   PROVIDERS,
   type AgentProvider,
+  type CodexAuthSnapshot,
+  type CodexUsageSnapshot,
   type InstalledSkillSummary,
   type KeybindingAction,
   type LlmProviderKind,
@@ -231,6 +235,334 @@ export function formatPublishedDate(value: string | null) {
     day: "numeric",
     year: "numeric",
   }).format(parsed)
+}
+
+type CodexUsageStatus = "idle" | "loading" | "success" | "error"
+type CodexAccountsStatus = "idle" | "loading" | "success" | "error"
+
+export function formatUsdAmount(value: number) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+export function formatCodexUsageDate(value: number | null) {
+  if (value === null) return "Never"
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(value)
+}
+
+export function formatCodexAccountDate(value: number | null) {
+  if (value === null) return "Never"
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(value)
+}
+
+export function CodexUsageCard({
+  status,
+  usage,
+  error,
+  onRefresh,
+}: {
+  status: CodexUsageStatus
+  usage: CodexUsageSnapshot | null
+  error: string | null
+  onRefresh: () => void
+}) {
+  if (status === "idle") {
+    return (
+      <div className="w-full max-w-[420px] rounded-2xl border border-border bg-card/30 px-4 py-4 text-sm text-muted-foreground">
+        <div className="space-y-3">
+          <div>
+            <div className="text-sm font-medium text-foreground">Codex Usage</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Load this local summary only when you explicitly request it.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+          >
+            Load usage
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === "loading") {
+    return (
+      <div className="w-full max-w-[420px] rounded-2xl border border-border bg-card/30 px-4 py-4 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>Loading Codex usage…</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === "error") {
+    return (
+      <div className="w-full max-w-[420px] rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-4">
+        <div className="text-sm text-destructive">{error ?? "Unable to load Codex usage."}</div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  const accountLabel = usage?.accountInfo?.email ?? usage?.accountInfo?.organization ?? "Unavailable"
+  const authLabel = usage?.accountInfo?.tokenSource ?? usage?.accountInfo?.apiKeySource ?? "Unavailable"
+
+  return (
+    <div className="w-full max-w-[420px] rounded-2xl border border-border bg-card/30 px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-foreground">Codex Usage</div>
+          <div className="mt-1 text-xs text-muted-foreground">Tracked from local {APP_NAME} Codex chats and imported history.</div>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
+        >
+          Refresh
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Local Spend</div>
+          <div className="mt-1 text-sm font-medium text-foreground">{formatUsdAmount(usage?.totalCostUsd ?? 0)}</div>
+        </div>
+        <div className="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Metered Turns</div>
+          <div className="mt-1 text-sm font-medium text-foreground">
+            {usage?.meteredTurnCount ?? 0} / {usage?.turnCount ?? 0}
+          </div>
+        </div>
+        <div className="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Chats</div>
+          <div className="mt-1 text-sm font-medium text-foreground">
+            {usage?.chatCount ?? 0}
+            {(usage?.importedChatCount ?? 0) > 0 ? ` (${usage?.importedChatCount} imported)` : ""}
+          </div>
+        </div>
+        <div className="rounded-xl border border-border bg-background/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Last Active</div>
+          <div className="mt-1 text-sm font-medium text-foreground">{formatCodexUsageDate(usage?.lastActiveAt ?? null)}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Account</span>
+          <span className="truncate text-right text-foreground">{accountLabel}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Plan</span>
+          <span className="truncate text-right text-foreground">{usage?.accountInfo?.subscriptionType ?? "Unavailable"}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Auth Source</span>
+          <span className="truncate text-right text-foreground">{authLabel}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function CodexAccountsCard({
+  status,
+  snapshot,
+  error,
+  switchingAccountId,
+  updatingAutoSwitchAccountId,
+  onRefresh,
+  onSwitch,
+  onToggleAutoSwitch,
+}: {
+  status: CodexAccountsStatus
+  snapshot: CodexAuthSnapshot | null
+  error: string | null
+  switchingAccountId: string | null
+  updatingAutoSwitchAccountId: string | null
+  onRefresh: () => void
+  onSwitch: (accountId: string) => void
+  onToggleAutoSwitch: (accountId: string, disabled: boolean) => void
+}) {
+  if (status === "idle" || status === "loading") {
+    return (
+      <div className="w-full max-w-[560px] rounded-2xl border border-border bg-card/30 px-4 py-4 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <Loader2 className={cn("h-4 w-4", status === "loading" && "animate-spin")} />
+          <span>{status === "loading" ? "Loading Codex accounts…" : "Load saved Codex accounts from ~/.codex/accounts."}</span>
+        </div>
+        {status === "idle" ? (
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+          >
+            Load accounts
+          </button>
+        ) : null}
+      </div>
+    )
+  }
+
+  if (status === "error") {
+    return (
+      <div className="w-full max-w-[560px] rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-4">
+        <div className="text-sm text-destructive">{error ?? "Unable to load Codex accounts."}</div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="w-full max-w-[560px] rounded-2xl border border-border bg-card/30 px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-foreground">Codex Accounts</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Switches `~/.codex/auth.json` using snapshots saved under `~/.codex/accounts`.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground transition-colors hover:bg-muted"
+        >
+          Refresh
+        </button>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-border bg-background/70 px-3 py-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground">Active</span>
+          <span className="font-medium text-foreground">{snapshot?.activeEmail ?? "Unknown"}</span>
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Switching disconnects current Codex sessions. New Codex turns will use the selected account.
+        </div>
+      </div>
+
+      {snapshot && snapshot.accounts.length > 0 ? (
+        <div className="mt-4 max-h-[320px] space-y-2 overflow-y-auto pr-1">
+          {snapshot.accounts.map((account) => {
+            const isSwitching = switchingAccountId === account.id
+            const isUpdatingAutoSwitch = updatingAutoSwitchAccountId === account.id
+            return (
+              <div
+                key={account.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background/70 px-3 py-3"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-foreground">
+                      {account.email ?? account.id}
+                    </span>
+                    {account.isActive ? (
+                      <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                        Active
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>{account.plan ?? "Unknown plan"}</span>
+                    <span>•</span>
+                    <span>{account.authMode === "apikey" ? "API key" : "ChatGPT auth"}</span>
+                    {account.lastRefresh ? (
+                      <>
+                        <span>•</span>
+                        <span>{account.lastRefresh}</span>
+                      </>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>Activated {formatCodexAccountDate(account.lastActivatedAt)}</span>
+                    <span>•</span>
+                    <span>Chatted {formatCodexAccountDate(account.lastChattedAt)}</span>
+                    <span>•</span>
+                    <span>{account.autoSwitchDisabled ? "Auto-switch excluded" : "Auto-switch allowed"}</span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <button
+                    type="button"
+                    disabled={isUpdatingAutoSwitch}
+                    onClick={() => onToggleAutoSwitch(account.id, !account.autoSwitchDisabled)}
+                    className={cn(
+                      "inline-flex min-w-[132px] items-center justify-center rounded-md border px-3 py-2 text-xs font-medium transition-colors",
+                      account.autoSwitchDisabled
+                        ? "border-amber-300/60 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-300"
+                        : "border-border bg-background text-foreground hover:bg-muted",
+                      isUpdatingAutoSwitch && "opacity-70"
+                    )}
+                  >
+                    {isUpdatingAutoSwitch ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    <span>{account.autoSwitchDisabled ? "Allow auto-switch" : "Exclude auto-switch"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={account.isActive || isSwitching}
+                    onClick={() => onSwitch(account.id)}
+                    className={cn(
+                      "inline-flex min-w-[132px] items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors",
+                      account.isActive
+                        ? "cursor-default border-border bg-muted text-muted-foreground"
+                        : "border-border bg-background text-foreground hover:bg-muted",
+                      isSwitching && "opacity-70"
+                    )}
+                  >
+                    {account.isActive ? <Check className="h-3.5 w-3.5" /> : null}
+                    {isSwitching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    <span>{account.isActive ? "Active" : isSwitching ? "Switching…" : "Switch"}</span>
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="mt-4 rounded-xl border border-dashed border-border bg-background/40 px-4 py-5 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2 text-foreground">
+            <RefreshCwOff className="h-4 w-4" />
+            <span>No saved account snapshots found.</span>
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            This feature reads existing `codex-auth` snapshots from `~/.codex/accounts/*.auth.json`.
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function ChangelogSection({
@@ -812,6 +1144,14 @@ export function SettingsPage() {
   const [authEnabled, setAuthEnabled] = useState(false)
   const [releases, setReleases] = useState<GithubRelease[]>([])
   const [changelogError, setChangelogError] = useState<string | null>(null)
+  const [codexUsageStatus, setCodexUsageStatus] = useState<CodexUsageStatus>("idle")
+  const [codexUsage, setCodexUsage] = useState<CodexUsageSnapshot | null>(null)
+  const [codexUsageError, setCodexUsageError] = useState<string | null>(null)
+  const [codexAccountsStatus, setCodexAccountsStatus] = useState<CodexAccountsStatus>("idle")
+  const [codexAccounts, setCodexAccounts] = useState<CodexAuthSnapshot | null>(null)
+  const [codexAccountsError, setCodexAccountsError] = useState<string | null>(null)
+  const [switchingCodexAccountId, setSwitchingCodexAccountId] = useState<string | null>(null)
+  const [updatingCodexAutoSwitchAccountId, setUpdatingCodexAutoSwitchAccountId] = useState<string | null>(null)
   const selectedPage = resolveSettingsSectionId(sectionId) ?? "general"
   const isConnecting = state.connectionStatus === "connecting" || !state.localProjectsReady
   const machineName = state.localProjects?.machine.displayName ?? "Unavailable"
@@ -974,6 +1314,76 @@ export function SettingsPage() {
       cancelled = true
     }
   }, [isConnecting, selectedPage])
+
+  useEffect(() => {
+    if (selectedPage !== "general" && selectedPage !== "providers") return
+    if (isConnecting) return
+    if (codexAccountsStatus !== "idle") return
+    void loadCodexAccounts()
+  }, [codexAccountsStatus, isConnecting, selectedPage])
+
+  async function loadCodexUsage() {
+    setCodexUsageStatus("loading")
+    setCodexUsageError(null)
+    try {
+      const snapshot = await state.socket.command<CodexUsageSnapshot>({ type: "settings.readCodexUsage" })
+      setCodexUsage(snapshot)
+      setCodexUsageStatus("success")
+    } catch (error) {
+      setCodexUsageError(error instanceof Error ? error.message : "Unable to load Codex usage.")
+      setCodexUsageStatus("error")
+    }
+  }
+
+  async function loadCodexAccounts() {
+    setCodexAccountsStatus("loading")
+    setCodexAccountsError(null)
+    try {
+      const snapshot = await state.socket.command<CodexAuthSnapshot>({ type: "settings.readCodexAccounts" })
+      setCodexAccounts(snapshot)
+      setCodexAccountsStatus("success")
+    } catch (error) {
+      setCodexAccountsError(error instanceof Error ? error.message : "Unable to load Codex accounts.")
+      setCodexAccountsStatus("error")
+    }
+  }
+
+  async function switchCodexAccount(accountId: string) {
+    setSwitchingCodexAccountId(accountId)
+    setCodexAccountsError(null)
+    try {
+      const snapshot = await state.socket.command<CodexAuthSnapshot>({
+        type: "settings.switchCodexAccount",
+        accountId,
+      })
+      setCodexAccounts(snapshot)
+      setCodexAccountsStatus("success")
+    } catch (error) {
+      setCodexAccountsError(error instanceof Error ? error.message : "Unable to switch Codex account.")
+      setCodexAccountsStatus("error")
+    } finally {
+      setSwitchingCodexAccountId(null)
+    }
+  }
+
+  async function setCodexAccountAutoSwitch(accountId: string, disabled: boolean) {
+    setUpdatingCodexAutoSwitchAccountId(accountId)
+    setCodexAccountsError(null)
+    try {
+      const snapshot = await state.socket.command<CodexAuthSnapshot>({
+        type: "settings.setCodexAccountAutoSwitch",
+        accountId,
+        disabled,
+      })
+      setCodexAccounts(snapshot)
+      setCodexAccountsStatus("success")
+    } catch (error) {
+      setCodexAccountsError(error instanceof Error ? error.message : "Unable to update Codex account auto-switch.")
+      setCodexAccountsStatus("error")
+    } finally {
+      setUpdatingCodexAutoSwitchAccountId(null)
+    }
+  }
 
   function commitScrollback() {
     const nextValue = Number(scrollbackDraft)
@@ -1601,6 +2011,29 @@ export function SettingsPage() {
                           size="sm"
                         />
                       </SettingsRow>
+
+                      <SettingsRow
+                        title="Codex Accounts"
+                        description="Switch between locally saved Codex auth snapshots."
+                        alignStart
+                      >
+                        <CodexAccountsCard
+                          status={codexAccountsStatus}
+                          snapshot={codexAccounts}
+                          error={codexAccountsError}
+                          switchingAccountId={switchingCodexAccountId}
+                          updatingAutoSwitchAccountId={updatingCodexAutoSwitchAccountId}
+                          onRefresh={() => {
+                            void loadCodexAccounts()
+                          }}
+                          onSwitch={(accountId) => {
+                            void switchCodexAccount(accountId)
+                          }}
+                          onToggleAutoSwitch={(accountId, disabled) => {
+                            void setCodexAccountAutoSwitch(accountId, disabled)
+                          }}
+                        />
+                      </SettingsRow>
                     </div>
                   </>
                 ) : selectedPage === "providers" ? (
@@ -1749,6 +2182,21 @@ export function SettingsPage() {
                           placeholder="Model id"
                         />
                       </div>
+                    </SettingsRow>
+
+                    <SettingsRow
+                      title="Codex Usage"
+                      description={`A local summary of Codex usage recorded by ${APP_NAME}.`}
+                      alignStart
+                    >
+                      <CodexUsageCard
+                        status={codexUsageStatus}
+                        usage={codexUsage}
+                        error={codexUsageError}
+                        onRefresh={() => {
+                          void loadCodexUsage()
+                        }}
+                      />
                     </SettingsRow>
                   </div>
                 ) : selectedPage === "keybindings" ? (

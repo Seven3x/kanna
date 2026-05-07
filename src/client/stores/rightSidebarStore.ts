@@ -6,7 +6,7 @@ export interface ProjectRightSidebarVisibilityState {
 }
 
 export interface ProjectRightSidebarUiState {
-  viewMode: "changes" | "history"
+  viewMode: "files" | "changes" | "history"
   collapsedPaths: Record<string, boolean>
   summary: string
   description: string

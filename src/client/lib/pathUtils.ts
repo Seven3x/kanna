@@ -72,6 +72,9 @@ export function parseLocalFileLink(target: string | undefined | null): ParsedLoc
   const trimmed = target.trim()
   if (!trimmed || /^(mailto:|ftp:|file:)/i.test(trimmed)) return null
 
+  // API routes are not local file links
+  if (/^\/api\//.test(trimmed)) return null
+
   if (/^https?:/i.test(trimmed)) {
     if (typeof window === "undefined") {
       return null

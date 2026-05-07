@@ -550,6 +550,39 @@ export interface AccountInfo {
   apiKeySource?: string
 }
 
+export type CodexAuthMode = "chatgpt" | "apikey"
+
+export interface CodexAuthAccountSummary {
+  id: string
+  email: string | null
+  plan: string | null
+  authMode: CodexAuthMode
+  isActive: boolean
+  isAvailable: boolean
+  autoSwitchDisabled: boolean
+  lastRefresh: string | null
+  lastActivatedAt: number | null
+  lastChattedAt: number | null
+}
+
+export interface CodexAuthSnapshot {
+  codexHome: string
+  hasActiveAuth: boolean
+  activeAccountId: string | null
+  activeEmail: string | null
+  accounts: CodexAuthAccountSummary[]
+}
+
+export interface CodexUsageSnapshot {
+  accountInfo: AccountInfo | null
+  chatCount: number
+  importedChatCount: number
+  turnCount: number
+  meteredTurnCount: number
+  totalCostUsd: number
+  lastActiveAt: number | null
+}
+
 export interface AskUserQuestionOption {
   label: string
   description?: string

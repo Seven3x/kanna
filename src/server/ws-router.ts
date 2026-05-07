@@ -19,9 +19,13 @@ import { writeStandaloneTranscriptExport } from "./standalone-export"
 import { TerminalManager } from "./terminal-manager"
 import type { UpdateManager } from "./update-manager"
 import { deriveChatSnapshot, deriveLocalProjectsSnapshot, deriveSidebarData } from "./read-models"
+import { readCodexAuthSnapshot, switchCodexAuthAccount, setCodexAccountAutoSwitchDisabled } from "./codex-accounts"
+import { deriveCodexUsageSnapshot } from "./codex-usage"
 import type {
   AppSettingsPatch,
   AppSettingsSnapshot,
+  CodexAuthSnapshot,
+  CodexUsageSnapshot,
   InstalledSkillsSnapshot,
   LlmProviderSnapshot,
   LlmProviderValidationResult,
@@ -126,6 +130,7 @@ interface CreateWsRouterArgs {
     write: (value: Pick<LlmProviderSnapshot, "provider" | "apiKey" | "model" | "baseUrl">) => Promise<LlmProviderSnapshot>
     validate: (value: Pick<LlmProviderSnapshot, "provider" | "apiKey" | "model" | "baseUrl">) => Promise<LlmProviderValidationResult>
   }
+  importCodexHistoryForProject?: (projectId: string, localPath: string) => Promise<{ latestChatId: string | null; importedChatCount: number }>
   refreshDiscovery: () => Promise<DiscoveredProject[]>
   getDiscoveredProjects: () => DiscoveredProject[]
   machineDisplayName: string
@@ -380,6 +385,7 @@ export function createWsRouter({
   appSettings,
   analytics,
   llmProvider,
+  importCodexHistoryForProject,
   refreshDiscovery,
   getDiscoveredProjects,
   machineDisplayName,
@@ -1127,6 +1133,26 @@ export function createWsRouter({
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result })
           return
         }
+        case "settings.readCodexAccounts": {
+          const snapshot: CodexAuthSnapshot = await readCodexAuthSnapshot()
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
+          return
+        }
+        case "settings.switchCodexAccount": {
+          const snapshot: CodexAuthSnapshot = await switchCodexAuthAccount(command.accountId)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
+          return
+        }
+        case "settings.setCodexAccountAutoSwitch": {
+          const snapshot: CodexAuthSnapshot = await setCodexAccountAutoSwitchDisabled(command.accountId, command.disabled)
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
+          return
+        }
+        case "settings.readCodexUsage": {
+          const snapshot: CodexUsageSnapshot = deriveCodexUsageSnapshot(store.state, (chatId: string) => store.getMessages(chatId))
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
+          return
+        }
         case "skills.search": {
           const snapshot = await searchSkills(command.query, command.limit)
           send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: snapshot })
@@ -1152,8 +1178,17 @@ export function createWsRouter({
           const normalizedPath = resolveLocalPath(command.localPath)
           const existingProjectId = store.state.projectIdsByPath.get(normalizedPath)
           const project = await store.openProject(command.localPath)
+          let latestChatId: string | null = null
+          if (importCodexHistoryForProject) {
+            try {
+              const importResult = await importCodexHistoryForProject(project.id, project.localPath)
+              latestChatId = importResult.latestChatId
+            } catch (error) {
+              console.warn("[kanna] Codex history import failed:", error instanceof Error ? error.message : String(error))
+            }
+          }
           await refreshDiscovery()
-          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: { projectId: project.id } })
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: { projectId: project.id, latestChatId } })
           if (!existingProjectId) {
             resolvedAnalytics.track("project_opened")
           }
@@ -1164,8 +1199,17 @@ export function createWsRouter({
           const normalizedPath = resolveLocalPath(command.localPath)
           const existingProjectId = store.state.projectIdsByPath.get(normalizedPath)
           const project = await store.openProject(command.localPath, command.title)
+          let latestChatId: string | null = null
+          if (importCodexHistoryForProject) {
+            try {
+              const importResult = await importCodexHistoryForProject(project.id, project.localPath)
+              latestChatId = importResult.latestChatId
+            } catch (error) {
+              console.warn("[kanna] Codex history import failed:", error instanceof Error ? error.message : String(error))
+            }
+          }
           await refreshDiscovery()
-          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: { projectId: project.id } })
+          send(ws, { v: PROTOCOL_VERSION, type: "ack", id, result: { projectId: project.id, latestChatId } })
           if (!existingProjectId) {
             resolvedAnalytics.track("project_opened")
             resolvedAnalytics.track("project_created")

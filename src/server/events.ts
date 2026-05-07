@@ -4,6 +4,17 @@ export interface ProjectRecord extends ProjectSummary {
   deletedAt?: number
 }
 
+export interface ExternalChatRecord {
+  provider: "codex"
+  source: "codex_local_history"
+  externalSessionId: string
+  importedFromPath: string
+  sourceFile: string
+  sourceUpdatedAt: number
+  importedAt: number
+  title: string
+}
+
 export interface ChatRecord {
   id: string
   projectId: string
@@ -20,12 +31,40 @@ export interface ChatRecord {
   hasMessages?: boolean
   lastMessageAt?: number
   lastTurnOutcome: "success" | "failed" | "cancelled" | null
+  external?: ExternalChatRecord | null
+}
+
+export function externalSessionKey(provider: string, externalSessionId: string) {
+  return `${provider}:${externalSessionId}`
+}
+
+export function normalizeExternalChatRecord(value: ExternalChatRecord): ExternalChatRecord {
+  return {
+    provider: value.provider,
+    source: value.source,
+    externalSessionId: value.externalSessionId,
+    importedFromPath: value.importedFromPath,
+    sourceFile: value.sourceFile,
+    sourceUpdatedAt: value.sourceUpdatedAt,
+    importedAt: value.importedAt,
+    title: value.title,
+  }
+}
+
+export function externalRecordsEqual(left: ExternalChatRecord, right: ExternalChatRecord) {
+  return left.provider === right.provider
+    && left.source === right.source
+    && left.externalSessionId === right.externalSessionId
+    && left.sourceFile === right.sourceFile
+    && left.sourceUpdatedAt === right.sourceUpdatedAt
+    && left.title === right.title
 }
 
 export interface StoreState {
   projectsById: Map<string, ProjectRecord>
   projectIdsByPath: Map<string, string>
   chatsById: Map<string, ChatRecord>
+  chatIdsByExternalSession: Map<string, string>
   queuedMessagesByChatId: Map<string, QueuedChatMessage[]>
 }
 
@@ -108,6 +147,13 @@ export type ChatEvent =
       chatId: string
       unread: boolean
     }
+  | {
+      v: 2
+      type: "chat_external_metadata_set"
+      timestamp: number
+      chatId: string
+      external: ExternalChatRecord
+    }
 
 export type MessageEvent = {
   v: 2
@@ -181,6 +227,7 @@ export function createEmptyState(): StoreState {
     projectsById: new Map(),
     projectIdsByPath: new Map(),
     chatsById: new Map(),
+    chatIdsByExternalSession: new Map(),
     queuedMessagesByChatId: new Map(),
   }
 }
